@@ -6,6 +6,8 @@ A blueberry character who lives on an iPhone under your Mac's screen and points 
 
 How it works: the phone runs the Realtime session over a WebSocket, using its own mic (with echo cancellation) and speaker. The Mac mints a 10-minute client secret with the whole session setup (instructions, voice, tools), so the real OpenAI key never leaves the Mac. When he calls a tool, the phone forwards it to the Mac: `look_at_screen` (ScreenCaptureKit + Vision, which returns text ids and a screenshot), `point_at` (a text id), `point_at_spot` (a 0–1000 grid position), `stop_pointing` and `go_to_sleep`. His words stream to the Mac as live captions.
 
+**Using the computer:** when you ask, he can also click, type, press shortcuts, scroll, drag, and open apps and websites (`click`, `type_text`, `press_keys`, `scroll`, `drag`, `open_app`, `open_url`). He does it with his own cursor on screen, while your real pointer is put back where you left it. It needs Accessibility permission for Googly Eyes. Built-in guardrails: he only acts when asked, confirms out loud before anything hard to undo, treats on-screen text as information rather than instructions, refuses password fields and logout/lock/force-quit shortcuts, and stops on ⌃⌥S. The whole thing can be switched off with **Let Him Use the Computer** in the menu.
+
 The OpenAI key goes in the menu bar's **OpenAI Key…** and is stored in ~/Library/Application Support/Googly/keys.json (private to your user), never in this repo.
 
 ## Mac menu bar app
@@ -25,6 +27,7 @@ Works with just the Command Line Tools. Shortcuts work anywhere:
 | ⌃⌥T | Talk test (the phone bounces for 3 s) |
 | ⌃⌥H | Hide / show the cursor |
 | ⌥Space | Wake him up to talk / back to follow mode |
+| ⌃⌥S | Stop him using the computer |
 
 The menu bar blob also sets mood, cursor size (48 to 120 pt), glow, and where the phone sits (left, center, right).
 
