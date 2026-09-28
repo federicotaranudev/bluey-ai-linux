@@ -6,7 +6,7 @@ A blueberry character who lives on an iPhone under your Mac's screen and points 
 
 How a question works: Apple speech-to-text hears you, ScreenCaptureKit + Vision read every word on screen with its box, Claude (`claude-opus-5`, low effort) picks what to say and which box ids to point at on which word, and ElevenLabs (Eleven v4 Turbo through the text-to-dialogue endpoint, falling back to Flash v2.5, then the Mac's voice) speaks with character timestamps so the cursor lands on cue.
 
-API keys go in the menu bar's **API Keys…** and are stored in the macOS Keychain, never in this repo.
+API keys go in the menu bar's **API Keys…** and are stored in ~/Library/Application Support/Googly/keys.json (private to your user), never in this repo.
 
 ## Mac menu bar app
 

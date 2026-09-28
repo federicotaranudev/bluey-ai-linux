@@ -1,38 +1,40 @@
 import Foundation
-import Security
 
-/// API keys live in the login Keychain, never in files or git.
+/// API keys live in a private file in ~/Library/Application Support/Googly (readable only by you),
+/// never in the project folder or git. Unlike the Keychain, this never asks for your password.
 enum Keychain {
-    private static let service = "co.visionairy.googly"
-
     enum Key: String {
         case anthropic, elevenlabs
     }
 
+    private static var cache: [String: String]?
+
+    private static var fileURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Googly", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        return dir.appendingPathComponent("keys.json")
+    }
+
+    private static func load() -> [String: String] {
+        if let cache { return cache }
+        let stored = (try? Data(contentsOf: fileURL))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] } ?? [:]
+        cache = stored
+        return stored
+    }
+
     static func get(_ key: Key) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key.rawValue,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data, let value = String(data: data, encoding: .utf8), !value.isEmpty else { return nil }
+        guard let value = load()[key.rawValue], !value.isEmpty else { return nil }
         return value
     }
 
     static func set(_ key: Key, _ value: String?) {
-        let base: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key.rawValue,
-        ]
-        SecItemDelete(base as CFDictionary)
-        guard let value, !value.isEmpty else { return }
-        var add = base
-        add[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(add as CFDictionary, nil)
+        var all = load()
+        all[key.rawValue] = value?.isEmpty == false ? value : nil
+        cache = all
+        guard let data = try? JSONSerialization.data(withJSONObject: all, options: [.prettyPrinted, .sortedKeys]) else { return }
+        FileManager.default.createFile(atPath: fileURL.path, contents: data, attributes: [.posixPermissions: 0o600])
     }
 }

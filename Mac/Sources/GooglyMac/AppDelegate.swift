@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "API Keys"
-        alert.informativeText = "Saved in your Mac's Keychain, never in the project files. Leave a box empty to keep the saved key."
+        alert.informativeText = "Saved privately on this Mac (not in the project files). Leave a box empty to keep the saved key."
         let claude = NSSecureTextField(frame: NSRect(x: 0, y: 30, width: 360, height: 24))
         claude.placeholderString = Keychain.get(.anthropic) == nil ? "Claude API key (sk-ant-…)" : "Claude key saved"
         let eleven = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
