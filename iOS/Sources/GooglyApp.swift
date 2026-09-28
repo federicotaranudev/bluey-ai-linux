@@ -81,9 +81,11 @@ struct RootView: View {
         live.onStateChange = { [link, animator] state in
             switch state {
             case .asleep:
+                animator.awake = false
                 animator.localMood = nil
                 link.send(Packet(command: "asleep"))
             case .waking:
+                animator.awake = true
                 animator.localMood = .happy
             case .listening:
                 animator.localMood = nil

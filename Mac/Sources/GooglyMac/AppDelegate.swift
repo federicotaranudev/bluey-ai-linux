@@ -75,6 +75,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleCaptions() { settings.captions.toggle() }
     @objc private func setVoice(_ item: NSMenuItem) {
         if let voice = item.representedObject as? String { UserDefaults.standard.set(voice, forKey: "realtimeVoice") }
+        restartIfAwake()
+    }
+
+    /// Wakes him again so a new voice or personality takes effect right away.
+    private func restartIfAwake() {
+        guard host.awake else { return }
+        server.broadcast(Packet(command: "sleep"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.server.broadcast(Packet(command: "wake")) }
+    }
+
+    @objc private func editPersonality() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "His Personality"
+        alert.informativeText = "Describe who he is and how he talks. How he looks at and points at your screen stays built in."
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 220))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let text = NSTextView(frame: scroll.bounds)
+        text.autoresizingMask = [.width]
+        text.isRichText = false
+        text.font = NSFont.systemFont(ofSize: 13)
+        text.string = RealtimeHost.personality
+        text.textContainerInset = NSSize(width: 6, height: 6)
+        scroll.documentView = text
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Reset to Default")
+        alert.window.initialFirstResponder = text
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: RealtimeHost.personality = text.string
+        case .alertThirdButtonReturn: RealtimeHost.personality = ""
+        default: return
+        }
+        restartIfAwake()
     }
 
     @objc private func editKeys() {
@@ -125,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let moodMenu = NSMenu()
-        for mood in Mood.allCases where mood != .talking && mood != .pointing {
+        for mood in Mood.allCases where mood != .talking && mood != .pointing && mood != .sleepy {
             let m = item(mood.title, #selector(setMood(_:)))
             m.representedObject = mood.rawValue
             m.state = settings.mood == mood ? .on : .off
@@ -159,11 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             v.state = current == voice ? .on : .off
             voiceMenu.addItem(v)
         }
-        let note = NSMenuItem(title: "Takes effect next time he wakes up", action: nil, keyEquivalent: "")
-        note.isEnabled = false
-        voiceMenu.addItem(.separator())
-        voiceMenu.addItem(note)
         menu.addItem(submenu("Voice", voiceMenu))
+        menu.addItem(item("Personality…", #selector(editPersonality)))
         menu.addItem(item("OpenAI Key…", #selector(editKeys)))
         let captions = item("Live Captions", #selector(toggleCaptions))
         captions.state = settings.captions ? .on : .off

@@ -68,6 +68,8 @@ final class FaceAnimator {
     var localMood: Mood?
     /// Loudness of the voice playing on this phone, 0…1.
     var localTalk: () -> Double = { 0 }
+    /// True while he's awake and talking with you. In follow mode his eyes stay locked on your mouse.
+    var awake = false
 
     func receive(_ face: FaceState, at time: Double) {
         target = face
@@ -84,8 +86,10 @@ final class FaceAnimator {
             mood = wantedMood
             moodChanged = now
             blinkStart = now          // blink through every mood change
-            hop.velocity += 260       // and a little bounce of surprise
-            pupil.velocity += 3
+            if mood != .sleepy && mood != .resting {
+                hop.velocity += 260   // and a little bounce of surprise
+                pupil.velocity += 3
+            }
         }
 
         // Where to look, plus tiny darting movements so the eyes never sit dead still.
@@ -103,7 +107,7 @@ final class FaceAnimator {
         }
         if mood == .thinking { want = CGPoint(x: 0.6 + 0.08 * sin(now * 1.3), y: -0.85) }
         if now > nextJitter {
-            let amount = mood == .talking || mood == .listening ? 0.14 : 0.08
+            let amount = !awake ? 0.015 : (mood == .talking || mood == .listening ? 0.14 : 0.08)
             jitter = CGPoint(x: .random(in: -amount...amount), y: .random(in: -amount...amount))
             nextJitter = now + .random(in: 0.25...0.9)
         }
@@ -129,6 +133,8 @@ final class FaceAnimator {
             wantPupil = 1.2; wantLift = 16; wantBlush = 0.85; wantSquint = 1
         case .resting:
             wantPupil = 0.9; wantLift = -8; wantBlush = 0.15
+        case .sleepy:
+            wantPupil = 0.88; wantLift = -10; wantTilt = 0.12; wantBlush = 0.15
         }
         pupil.step(to: wantPupil, dt: dt)
         browLift.step(to: wantLift, dt: dt)
@@ -139,18 +145,20 @@ final class FaceAnimator {
 
         // An occasional happy little hop when nothing much is going on.
         if now > nextHop {
-            if talk < 0.05 { hop.velocity += .random(in: 180...320) }
+            if talk < 0.05, mood != .sleepy, mood != .resting { hop.velocity += .random(in: 180...320) }
             nextHop = now + .random(in: 7...14)
         }
         hop.step(to: 0, dt: dt)
 
         // Blinks, sometimes doubled.
+        // Blinks, sometimes doubled. When he's drowsy they're slow and heavy.
+        let drowsy = mood == .sleepy
         if now > nextBlink {
             blinkStart = now
-            doubleBlink = Double.random(in: 0...1) < 0.25
-            nextBlink = now + .random(in: 2.0...5.0)
+            doubleBlink = !drowsy && Double.random(in: 0...1) < 0.25
+            nextBlink = now + (drowsy ? .random(in: 1.6...3.0) : .random(in: 2.0...5.0))
         }
-        let p = (now - blinkStart) / 0.15
+        let p = (now - blinkStart) / (drowsy ? 0.7 : 0.15)
         var closed = (0...1).contains(p) ? sin(.pi * p) : 0
         if doubleBlink, (1.3...2.3).contains(p) { closed = sin(.pi * (p - 1.3)) }
 
@@ -254,8 +262,11 @@ struct FaceView: View {
 
             switch f.mood {
             case .resting:
-                let lid = CGRect(x: c.x - 62, y: c.y + 8, width: 124, height: 18)
-                ctx.fill(Path(roundedRect: lid, cornerRadius: 9), with: .color(ink))
+                // Peacefully closed: a soft downward curve.
+                var shut = Path()
+                shut.move(to: CGPoint(x: c.x - 62, y: c.y + 6))
+                shut.addQuadCurve(to: CGPoint(x: c.x + 62, y: c.y + 6), control: CGPoint(x: c.x, y: c.y + 52))
+                ctx.stroke(shut, with: .color(ink), style: StrokeStyle(lineWidth: 18, lineCap: .round))
 
             case .happy where f.squint > 0.6:
                 var arc = Path()
@@ -276,7 +287,8 @@ struct FaceView: View {
                 // Eyes converge a little when looking down close, and reach further for a livelier look.
                 let reach: CGFloat = 50
                 let r = 46 * f.pupil
-                let pupil = CGPoint(x: c.x + g.x * reach - side * 3, y: c.y + g.y * reach * open)
+                var pupil = CGPoint(x: c.x + g.x * reach - side * 3, y: c.y + g.y * reach * open)
+                if f.mood == .sleepy { pupil.y = max(pupil.y, c.y) + 28 }  // eyes sink under heavy lids
                 var inside = ctx
                 inside.clip(to: whitePath)
                 inside.fill(Path(ellipseIn: CGRect(x: pupil.x - r, y: pupil.y - r, width: r * 2, height: r * 2)), with: .color(ink))
@@ -290,10 +302,31 @@ struct FaceView: View {
                     let lid = CGRect(x: c.x - 110, y: c.y + 95 * open - 70 * f.squint, width: 220, height: 160)
                     fillSkin(Path(ellipseIn: lid), in: &inside, body: body)
                 }
+                // Heavy, droopy lids when he's getting sleepy.
+                if f.mood == .sleepy {
+                    let droop = 0.5 + 0.06 * sin(f.time * 1.3)
+                    fillSkin(Path(CGRect(x: c.x - 100, y: white.minY - 10, width: 200, height: white.height * droop + 10)),
+                             in: &inside, body: body)
+                    inside.stroke(Path { p in
+                        p.move(to: CGPoint(x: c.x - 92, y: white.minY + white.height * droop))
+                        p.addLine(to: CGPoint(x: c.x + 92, y: white.minY + white.height * droop))
+                    }, with: .color(navy.opacity(0.7)), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                }
                 // A soft upper lid when he's focused on pointing.
                 if f.mood == .pointing {
                     fillSkin(Path(CGRect(x: c.x - 100, y: white.minY - 20, width: 200, height: 40)), in: &inside, body: body)
                 }
+            }
+        }
+
+        if f.mood == .resting {
+            // Little z's floating up while he naps.
+            for i in 0..<3 {
+                let phase = (f.time * 0.35 + Double(i) / 3).truncatingRemainder(dividingBy: 1)
+                let size = 26 + CGFloat(i) * 8
+                let point = CGPoint(x: body.minX + 660 + CGFloat(phase) * 70 + CGFloat(sin(phase * 6)) * 8,
+                                    y: body.minY + 90 - CGFloat(phase) * 110)
+                ctx.draw(Text("z").font(.fredoka(size)).foregroundColor(.white.opacity(0.9 * sin(.pi * phase))), at: point)
             }
         }
 

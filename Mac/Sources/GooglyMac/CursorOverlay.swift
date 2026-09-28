@@ -116,6 +116,9 @@ final class CursorEngine {
     var brainMood: Mood?
     /// Where the phone's eyes should look instead of at the cursor (e.g. at you while listening).
     var gazeOverride: CGPoint?
+    /// True while he's awake and talking with you (no dozing off then).
+    var awake = false
+    private var lastMouseMove = CACurrentMediaTime()
     /// Live voice loudness, 0…1.
     var talkLevel: () -> Double = { 0 }
     var blinkUntil = 0.0
@@ -145,6 +148,7 @@ final class CursorEngine {
         case .following: target = dockPoint(in: bounds)
         case .pinned(let p): target = p
         }
+        if hypot(mouse.x - self.mouse.x, mouse.y - self.mouse.y) > 1.5 { lastMouseMove = now }
         self.mouse = mouse
         if !placed {
             tip = dockPoint(in: bounds)
@@ -235,6 +239,10 @@ final class CursorEngine {
             mood = .talking
         } else if case .pinned = mode, mood == .listening {
             mood = .pointing
+        } else if mode == .following, !awake, mood == .listening {
+            // Your mouse sat still: he gets drowsy after 5 seconds and dozes off after 15.
+            let idle = now - lastMouseMove
+            if idle > 15 { mood = .resting } else if idle > 5 { mood = .sleepy }
         }
         return FaceState(gazeX: gx, gazeY: gy, mood: mood, talk: talk)
     }

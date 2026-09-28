@@ -52,6 +52,7 @@ final class RealtimeHost {
 
     func setAwake(_ on: Bool) {
         awake = on
+        engine.awake = on
         engine.brainMood = nil
         engine.gazeOverride = on ? CGPoint(x: 0, y: 0.15) : nil  // looks at you while awake
         if !on {
@@ -176,11 +177,25 @@ final class RealtimeHost {
         }
     }
 
-    static let instructions = """
+    /// Who he is. Editable from the menu bar (Personality…).
+    static let defaultPersonality = """
     You are a small, cute blueberry character with big googly eyes. You live on an iPhone that sits just under the \
     user's computer screen, and you have your own big cursor you can fly around their screen to point at things. \
     The user is often filming a video, so talk like a warm, playful co-host: short natural spoken sentences, usually \
-    one to three, never lists or markdown, and never read out ids or coordinates.
+    one to three.
+    """
+
+    static var personality: String {
+        get {
+            let saved = UserDefaults.standard.string(forKey: "personality")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return saved.isEmpty ? defaultPersonality : saved
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "personality") }
+    }
+
+    /// How he uses his tools. Always included, whatever the personality says.
+    static let toolGuide = """
+    Never use lists or markdown, and never read out ids or coordinates.
 
     Whenever the user asks about anything on their screen, call look_at_screen first. Then, as you explain, call \
     point_at right before you mention each thing so your cursor lands on it as you talk about it. Point at the most \
@@ -189,6 +204,8 @@ final class RealtimeHost {
     might have changed since your last look, look again. Call stop_pointing when you're done explaining. When the \
     user says goodbye or asks you to sleep, say a very short goodbye and call go_to_sleep.
     """
+
+    static var instructions: String { personality + "\n\n" + toolGuide }
 
     static var session: [String: Any] {
         [
