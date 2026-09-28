@@ -113,6 +113,10 @@ final class Brain {
         request.setValue(key, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
+        // Keys that aren't scoped to one workspace have to name it on every request.
+        if let workspace = UserDefaults.standard.string(forKey: "anthropicWorkspace"), !workspace.isEmpty {
+            request.setValue(workspace, forHTTPHeaderField: "anthropic-workspace-id")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)

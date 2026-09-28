@@ -105,7 +105,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         claude.placeholderString = Keychain.get(.anthropic) == nil ? "Claude API key (sk-ant-…)" : "Claude key saved"
         let eleven = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
         eleven.placeholderString = Keychain.get(.elevenlabs) == nil ? "ElevenLabs API key (optional)" : "ElevenLabs key saved"
-        let stack = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 54))
+        let workspace = NSTextField(frame: NSRect(x: 0, y: 60, width: 360, height: 24))
+        workspace.placeholderString = "Claude workspace ID (only if your key needs one)"
+        workspace.stringValue = UserDefaults.standard.string(forKey: "anthropicWorkspace") ?? ""
+        claude.frame.origin.y = 30
+        let stack = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 84))
+        stack.addSubview(workspace)
         stack.addSubview(claude)
         stack.addSubview(eleven)
         alert.accessoryView = stack
@@ -116,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let c = claude.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let e = eleven.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !c.isEmpty { Keychain.set(.anthropic, c) }
+        UserDefaults.standard.set(workspace.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "anthropicWorkspace")
         if !e.isEmpty { Keychain.set(.elevenlabs, e); loadVoices() }
     }
 
