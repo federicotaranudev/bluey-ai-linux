@@ -7,8 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let overlay = CursorOverlay()
     private let server = PhoneServer()
     private var statusItem: NSStatusItem!
-    private lazy var conductor = Conductor(overlay: overlay)
-    private var voices: [(id: String, name: String)] = []
+    private lazy var host = RealtimeHost(overlay: overlay)
+
+    static let voices = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.registerBundled()
@@ -21,47 +22,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         overlay.onFace = { [weak self] face in self?.server.send(face) }
         overlay.start()
-        server.onPhonesChanged = { [weak self] _ in self?.refreshIcon() }
-        server.onRequest = { [weak self] packet in
-            guard let self else { return }
-            if let volume = packet.volume {
-                self.settings.volume = min(1, max(0, volume))
-                self.conductor.voice.applyVolume()
-            }
-            switch packet.command {
-            case "testVoice": self.conductor.testVoice()
-            case "playing", "done": self.conductor.voice.phoneEvent(packet.command!, id: packet.speech ?? -1)
-            default: break
-            }
+        server.onPhonesChanged = { [weak self] names in
+            self?.refreshIcon()
+            if names.isEmpty, self?.host.awake == true { self?.host.setAwake(false) }
         }
+        server.onRequest = { [weak self] packet, reply in self?.host.handle(packet, reply: reply) }
         server.start()
-        conductor.voice.sendToPhone = { [weak self] audio, id in self?.server.sendSpeech(audio, id: id) ?? false }
-        conductor.voice.stopOnPhone = { [weak self] in self?.server.stopSpeech() }
+        host.onChange = { [weak self] in self?.refreshIcon() }
 
-        // ⌃⌥P point here, ⌃⌥F follow mouse, ⌃⌥D dock, ⌃⌥H hide, ⌃⌥T talk test.
+        // ⌥Space wakes him up or puts him back to sleep (same as double tapping him on the phone).
+        HotKeys.shared.register(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in self?.toggleAwake() }
+        // ⌃⌥P point here, ⌃⌥F follow mouse, ⌃⌥D stop pointing, ⌃⌥H hide, ⌃⌥T talk test.
         HotKeys.shared.register(keyCode: kVK_ANSI_P) { [weak self] in self?.pointHere() }
         HotKeys.shared.register(keyCode: kVK_ANSI_F) { [weak self] in self?.toggleFollow() }
         HotKeys.shared.register(keyCode: kVK_ANSI_D) { [weak self] in self?.overlay.goHome() }
         HotKeys.shared.register(keyCode: kVK_ANSI_H) { [weak self] in self?.toggleShow() }
         HotKeys.shared.register(keyCode: kVK_ANSI_T) { [weak self] in self?.overlay.talkTest() }
 
-        // Hold ⌥Space to ask, let go and he answers. ⌃⌥A asks by typing.
-        HotKeys.shared.register(keyCode: kVK_Space, modifiers: optionKey,
-                                onRelease: { [weak self] in self?.conductor.releaseTalk() },
-                                onPress: { [weak self] in self?.conductor.pressTalk() })
-        HotKeys.shared.register(keyCode: kVK_ANSI_A) { [weak self] in self?.askByTyping() }
-        HotKeys.shared.register(keyCode: kVK_ANSI_V) { [weak self] in self?.conductor.testVoice() }
-
-        conductor.onChange = { [weak self] in self?.refreshIcon() }
-        Listener.requestPermissions { problem in if let problem { NSLog("Googly: \(problem)") } }
-        loadVoices()
-        if Keychain.get(.anthropic) == nil {
+        if Keychain.get(.openai) == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.editKeys() }
         }
-    }
-
-    private func loadVoices() {
-        Task { @MainActor in self.voices = await Voice.fetchVoices() }
     }
 
     private func refreshIcon() {
@@ -88,65 +68,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setSize(_ item: NSMenuItem) { settings.cursorSize = Double(item.tag) }
     @objc private func setPhonePosition(_ item: NSMenuItem) { settings.phonePosition = Double(item.tag) / 100 }
-    @objc private func volumeChanged(_ slider: NSSlider) {
-        settings.volume = slider.doubleValue
-        conductor.voice.applyVolume()
-        server.sendVolume(settings.volume)
+    @objc private func toggleAwake() {
+        server.broadcast(Packet(command: host.awake ? "sleep" : "wake"))
     }
-
-    @objc private func testVoice() { conductor.testVoice() }
-    @objc private func toggleVoiceOnPhone() { settings.voiceOnPhone.toggle() }
 
     @objc private func toggleCaptions() { settings.captions.toggle() }
     @objc private func setVoice(_ item: NSMenuItem) {
-        if let id = item.representedObject as? String { UserDefaults.standard.set(id, forKey: "voiceID") }
-    }
-
-    @objc private func askByTyping() {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "Ask Googly"
-        alert.informativeText = "Type what you'd say out loud. He'll look at your screen and answer."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        field.placeholderString = "What's the biggest number in this table?"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Ask")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let question = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty else { return }
-        // Let the dialog disappear before he looks at the screen.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.conductor.ask(typed: question) }
+        if let voice = item.representedObject as? String { UserDefaults.standard.set(voice, forKey: "realtimeVoice") }
     }
 
     @objc private func editKeys() {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "API Keys"
-        alert.informativeText = "Saved privately on this Mac (not in the project files). Leave a box empty to keep the saved key."
-        let claude = NSSecureTextField(frame: NSRect(x: 0, y: 30, width: 360, height: 24))
-        claude.placeholderString = Keychain.get(.anthropic) == nil ? "Claude API key (sk-ant-…)" : "Claude key saved"
-        let eleven = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        eleven.placeholderString = Keychain.get(.elevenlabs) == nil ? "ElevenLabs API key (optional)" : "ElevenLabs key saved"
-        let workspace = NSTextField(frame: NSRect(x: 0, y: 60, width: 360, height: 24))
-        workspace.placeholderString = "Claude workspace ID (only if your key needs one)"
-        workspace.stringValue = UserDefaults.standard.string(forKey: "anthropicWorkspace") ?? ""
-        claude.frame.origin.y = 30
-        let stack = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 84))
-        stack.addSubview(workspace)
-        stack.addSubview(claude)
-        stack.addSubview(eleven)
-        alert.accessoryView = stack
+        alert.messageText = "OpenAI API Key"
+        alert.informativeText = "Saved privately on this Mac (not in the project files). The phone only ever gets short-lived keys."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = Keychain.get(.openai) == nil ? "sk-…" : "Key saved. Paste a new one to replace it."
+        alert.accessoryView = field
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = claude
+        alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let c = claude.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let e = eleven.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !c.isEmpty { Keychain.set(.anthropic, c) }
-        UserDefaults.standard.set(workspace.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "anthropicWorkspace")
-        if !e.isEmpty { Keychain.set(.elevenlabs, e); loadVoices() }
+        let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty { Keychain.set(.openai, key) }
     }
 
     @objc private func setMood(_ item: NSMenuItem) {
@@ -163,15 +107,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 action: nil, keyEquivalent: "")
         status.isEnabled = false
         menu.addItem(status)
-        let brain = NSMenuItem(title: conductor.statusText, action: nil, keyEquivalent: "")
-        brain.isEnabled = false
-        menu.addItem(brain)
-        if let problem = conductor.screenProblem {
-            let p = NSMenuItem(title: problem, action: nil, keyEquivalent: "")
-            p.isEnabled = false
-            menu.addItem(p)
-        }
-        menu.addItem(item("Ask by Typing…", #selector(askByTyping), key: "a"))
+        let wake = NSMenuItem(title: host.awake ? "Go to Sleep (Follow Mode)" : "Wake Up and Talk",
+                              action: #selector(toggleAwake), keyEquivalent: " ")
+        wake.keyEquivalentModifierMask = [.option]
+        wake.target = self
+        wake.isEnabled = !phones.isEmpty
+        menu.addItem(wake)
         menu.addItem(.separator())
 
         let point = item("Point Here", #selector(pointHere), key: "p")
@@ -211,40 +152,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(submenu("Phone Sits Under", phoneMenu))
 
         let voiceMenu = NSMenu()
-        let voiceStatus = NSMenuItem(title: "Last reply: \(conductor.voice.status)", action: nil, keyEquivalent: "")
-        voiceStatus.isEnabled = false
-        voiceMenu.addItem(voiceStatus)
-        voiceMenu.addItem(.separator())
-        if voices.isEmpty {
-            let none = NSMenuItem(title: Keychain.get(.elevenlabs) == nil ? "Add an ElevenLabs key to pick a voice" : "Loading voices…",
-                                  action: nil, keyEquivalent: "")
-            none.isEnabled = false
-            voiceMenu.addItem(none)
-        }
-        for voice in voices.prefix(40) {
-            let v = item(voice.name, #selector(setVoice(_:)))
-            v.representedObject = voice.id
-            v.state = conductor.voice.voiceID == voice.id ? .on : .off
+        let current = UserDefaults.standard.string(forKey: "realtimeVoice") ?? "marin"
+        for voice in Self.voices {
+            let v = item(voice.capitalized, #selector(setVoice(_:)))
+            v.representedObject = voice
+            v.state = current == voice ? .on : .off
             voiceMenu.addItem(v)
         }
+        let note = NSMenuItem(title: "Takes effect next time he wakes up", action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        voiceMenu.addItem(.separator())
+        voiceMenu.addItem(note)
         menu.addItem(submenu("Voice", voiceMenu))
-
-        let volumeLabel = NSMenuItem(title: "Volume", action: nil, keyEquivalent: "")
-        volumeLabel.isEnabled = false
-        menu.addItem(volumeLabel)
-        let volumeItem = NSMenuItem()
-        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 28))
-        let slider = NSSlider(value: settings.volume, minValue: 0, maxValue: 1, target: self, action: #selector(volumeChanged(_:)))
-        slider.frame = NSRect(x: 20, y: 4, width: 200, height: 20)
-        slider.isContinuous = true
-        holder.addSubview(slider)
-        volumeItem.view = holder
-        menu.addItem(volumeItem)
-        menu.addItem(item("Test Voice", #selector(testVoice), key: "v"))
-        let onPhone = item("Voice Plays From Phone", #selector(toggleVoiceOnPhone))
-        onPhone.state = settings.voiceOnPhone ? .on : .off
-        menu.addItem(onPhone)
-        menu.addItem(item("API Keys…", #selector(editKeys)))
+        menu.addItem(item("OpenAI Key…", #selector(editKeys)))
         let captions = item("Live Captions", #selector(toggleCaptions))
         captions.state = settings.captions ? .on : .off
         menu.addItem(captions)

@@ -14,6 +14,7 @@ struct GooglyApp: App {
 
 struct RootView: View {
     @StateObject private var link = MacLink()
+    @StateObject private var live = LiveVoice()
     @Environment(\.scenePhase) private var scenePhase
     @State private var animator = FaceAnimator()
     @State private var showPairing = true
@@ -22,10 +23,10 @@ struct RootView: View {
         ZStack {
             FaceView(animator: animator)
                 .contentShape(Rectangle())
-                .gesture(lookAtFinger)
-                .onTapGesture(count: 2) { cycleLocalMood() }
+                .onTapGesture(count: 2) { live.toggle() }  // double tap: wake up / back to follow mode
+                .simultaneousGesture(lookAtFinger)
 
-            SoundButton(link: link)
+            SoundButton(link: link, live: live)
 
             if showPairing && !link.connected {
                 PairingView { withAnimation(.easeOut(duration: 0.3)) { showPairing = false } }
@@ -37,7 +38,8 @@ struct RootView: View {
         .phoneChrome()
         .onAppear {
             link.onFace = { [animator] face in animator.receive(face, at: Date().timeIntervalSinceReferenceDate) }
-            animator.localTalk = { [speaker = link.speaker] in speaker.level }
+            animator.localTalk = { [live] in live.level }
+            wireLiveVoice()
             link.start()
         }
         .onChange(of: link.connected) { _, connected in
@@ -63,11 +65,40 @@ struct RootView: View {
             .onEnded { _ in animator.touchGaze = nil }
     }
 
-    /// Double tap cycles moods locally, so you can try each one on camera.
-    private func cycleLocalMood() {
-        let order: [Mood?] = [nil, .happy, .thinking, .talking, .resting]
-        let index = order.firstIndex(where: { $0 == animator.localMood }) ?? 0
-        animator.localMood = order[(index + 1) % order.count]
+    /// Connects the live voice to the Mac: keys, tools, captions and wake/sleep.
+    private func wireLiveVoice() {
+        live.requestToken = { [link] done in
+            link.request(Packet(command: "realtimeToken")) { reply in done(reply?.text) }
+        }
+        live.runTool = { [link] name, arguments, done in
+            link.request(Packet(command: "tool", tool: name, text: arguments)) { reply in
+                done(reply?.text ?? "The Mac didn't answer.", reply?.image)
+            }
+        }
+        live.onCaption = { [link] text, finished in
+            link.send(Packet(command: finished ? "captionDone" : "caption", text: text))
+        }
+        live.onStateChange = { [link, animator] state in
+            switch state {
+            case .asleep:
+                animator.localMood = nil
+                link.send(Packet(command: "asleep"))
+            case .waking:
+                animator.localMood = .happy
+            case .listening:
+                animator.localMood = nil
+                link.send(Packet(command: "awake"))
+            case .speaking:
+                animator.localMood = .talking
+            }
+        }
+        link.onCommand = { [live] command in
+            switch command {
+            case "wake": live.wake()
+            case "sleep": live.sleep()
+            default: break
+            }
+        }
     }
 }
 

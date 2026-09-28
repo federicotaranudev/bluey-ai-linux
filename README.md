@@ -2,11 +2,11 @@
 
 A blueberry character who lives on an iPhone under your Mac's screen and points at things with his own big cursor.
 
-**Now:** the phone face, a big cursor you can drive by hand, and a brain: hold ⌥Space, ask about what's on screen, and he answers out loud while pointing at the exact words he's talking about.
+**Now:** live voice with OpenAI (`gpt-realtime-2.1`). Double tap him on the phone (or press ⌥Space on the Mac) to wake him up and just talk. He looks at your screen, flies his cursor to what he's explaining, and answers out loud from the phone. Double tap again and he goes back to follow mode, where the cursor hides and his eyes follow your mouse.
 
-How a question works: Apple speech-to-text hears you, ScreenCaptureKit + Vision read every word on screen with its box, Claude (`claude-opus-5`, low effort) picks what to say and which box ids to point at on which word, and ElevenLabs (Eleven v4 Turbo through the text-to-dialogue endpoint, falling back to Flash v2.5, then the Mac's voice) speaks with character timestamps so the cursor lands on cue.
+How it works: the phone runs the Realtime session over a WebSocket, using its own mic (with echo cancellation) and speaker. The Mac mints a 10-minute client secret with the whole session setup (instructions, voice, tools), so the real OpenAI key never leaves the Mac. When he calls a tool, the phone forwards it to the Mac: `look_at_screen` (ScreenCaptureKit + Vision, which returns text ids and a screenshot), `point_at` (a text id), `point_at_spot` (a 0–1000 grid position), `stop_pointing` and `go_to_sleep`. His words stream to the Mac as live captions.
 
-API keys go in the menu bar's **API Keys…** and are stored in ~/Library/Application Support/Googly/keys.json (private to your user), never in this repo.
+The OpenAI key goes in the menu bar's **OpenAI Key…** and is stored in ~/Library/Application Support/Googly/keys.json (private to your user), never in this repo.
 
 ## Mac menu bar app
 
@@ -24,8 +24,7 @@ Works with just the Command Line Tools. Shortcuts work anywhere:
 | ⌃⌥D | Go home, docked above the phone |
 | ⌃⌥T | Talk test (the phone bounces for 3 s) |
 | ⌃⌥H | Hide / show the cursor |
-| ⌥Space (hold) | Ask out loud; let go and he answers |
-| ⌃⌥A | Ask by typing |
+| ⌥Space | Wake him up to talk / back to follow mode |
 
 The menu bar blob also sets mood, cursor size (48 to 120 pt), glow, and where the phone sits (left, center, right).
 
@@ -33,7 +32,7 @@ The menu bar blob also sets mood, cursor size (48 to 120 pt), glow, and where th
 
 Needs full Xcode. Open `GooglyEyes.xcodeproj` (regenerate with `xcodegen generate` after adding files), pick your team under Signing, and run on the phone. It finds the Mac on the same Wi-Fi by itself.
 
-On the phone: drag a finger to make him look at it, double tap to cycle moods.
+On the phone: double tap him to wake him up or put him back to sleep, and drag a finger to make him look at it. The faint speaker button at the top right sets his volume.
 
 ## Layout
 

@@ -3,6 +3,8 @@ import SwiftUI
 /// A tiny, quiet speaker button in the top-right corner. Tap it for the voice volume and a test line.
 struct SoundButton: View {
     @ObservedObject var link: MacLink
+    @ObservedObject var live: LiveVoice
+    @State private var volume = 1.0
     @State private var open = false
     @State private var lastTouch = Date()
 
@@ -28,6 +30,7 @@ struct SoundButton: View {
         .padding(.top, 10)
         .padding(.trailing, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .onAppear { volume = live.volume }
         .task(id: lastTouch) {
             // Tuck the panel away after a few quiet seconds so it never ends up in a shot.
             try? await Task.sleep(for: .seconds(6))
@@ -36,7 +39,7 @@ struct SoundButton: View {
     }
 
     private var speakerIcon: String {
-        link.volume < 0.01 ? "speaker.slash.fill" : link.volume < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill"
+        volume < 0.01 ? "speaker.slash.fill" : volume < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill"
     }
 
     private var panel: some View {
@@ -47,17 +50,17 @@ struct SoundButton: View {
                     .textCase(.uppercase)
                     .foregroundStyle(Color(hex: Palette.inkSoft))
                 Spacer()
-                Text("\(Int((link.volume * 100).rounded()))%")
+                Text("\(Int((volume * 100).rounded()))%")
                     .font(.plexMono(13))
                     .foregroundStyle(.white)
             }
-            Slider(value: Binding(get: { link.volume }, set: { link.setVolume($0); lastTouch = Date() }), in: 0...1)
+            Slider(value: Binding(get: { volume }, set: { volume = $0; live.volume = $0; lastTouch = Date() }), in: 0...1)
                 .tint(Color(hex: Palette.berry2))
             Button {
-                link.testVoice()
+                live.sayHi()
                 lastTouch = Date()
             } label: {
-                Text("Test voice")
+                Text(live.state == .asleep ? "Wake him up" : "Say hi")
                     .font(.plexSans(15).weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: 44)

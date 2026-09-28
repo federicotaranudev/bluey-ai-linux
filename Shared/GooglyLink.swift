@@ -42,15 +42,28 @@ public struct Packet: Codable, Sendable {
     public var audio: String?
     /// Which speech an audio packet or a playing/done event belongs to.
     public var speech: Int?
+    /// Pairs a request with its reply (tool calls, realtime tokens).
+    public var callID: String?
+    /// Tool name for a "tool" request.
+    public var tool: String?
+    /// Free text: tool arguments or output, a token, a caption.
+    public var text: String?
+    /// A JPEG (base64) that goes with a tool result.
+    public var image: String?
 
     public init(face: FaceState? = nil, hello: String? = nil, volume: Double? = nil, command: String? = nil,
-                audio: String? = nil, speech: Int? = nil) {
+                audio: String? = nil, speech: Int? = nil, callID: String? = nil, tool: String? = nil,
+                text: String? = nil, image: String? = nil) {
         self.face = face
         self.hello = hello
         self.volume = volume
         self.command = command
         self.audio = audio
         self.speech = speech
+        self.callID = callID
+        self.tool = tool
+        self.text = text
+        self.image = image
     }
 }
 
@@ -99,7 +112,7 @@ public final class LineConnection {
     }
 
     private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1024 * 1024) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             if let data, !data.isEmpty {
                 self.buffer.append(data)

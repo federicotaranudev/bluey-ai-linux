@@ -26,6 +26,8 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Googly Eyes finds the Mac app on your Wi-Fi so the character can look where it points.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Talk to your blueberry. He listens while he's awake (double tap him to wake him up or put him to sleep).</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Fredoka.ttf</string>

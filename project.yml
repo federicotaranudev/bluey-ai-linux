@@ -36,6 +36,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSLocalNetworkUsageDescription: Googly Eyes finds the Mac app on your Wi-Fi so the character can look where it points.
+        NSMicrophoneUsageDescription: Talk to your blueberry. He listens while he's awake (double tap him to wake him up or put him to sleep).
         NSBonjourServices:
           - _googly._tcp
         UIAppFonts:

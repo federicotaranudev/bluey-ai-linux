@@ -9,17 +9,9 @@ import UIKit
 final class MacLink: ObservableObject {
     @Published private(set) var connected = false
     @Published private(set) var macName: String?
-    /// Voice volume on this phone, 0…1.
-    @Published private(set) var volume: Double
-    /// His voice plays here, from the phone's speaker.
-    let speaker = SpeechPlayer()
-
-    init() {
-        volume = speaker.volume
-        speaker.onEvent = { [weak self] event, id in
-            self?.link?.send(Packet(command: event, speech: id))
-        }
-    }
+    /// Commands from the Mac, like "wake" and "sleep".
+    var onCommand: ((String) -> Void)?
+    private var waiting: [String: (Packet?) -> Void] = [:]
 
     var onFace: ((FaceState) -> Void)?
 
@@ -73,6 +65,9 @@ final class MacLink: ObservableObject {
                 link.send(Packet(hello: Self.deviceName))
             case .failed, .cancelled:
                 self.connected = false
+                let waiting = self.waiting
+                self.waiting = [:]
+                waiting.values.forEach { $0(nil) }
                 self.macName = nil
                 self.link = nil
                 self.scheduleRetry()
@@ -85,20 +80,29 @@ final class MacLink: ObservableObject {
         link.onPacket = { [weak self] packet in
             if let name = packet.hello { self?.macName = name }
             if let face = packet.face { self?.onFace?(face) }
-            if let audio = packet.audio, let id = packet.speech { self?.speaker.play(base64: audio, id: id) }
-            if packet.command == "stopSpeech" { self?.speaker.stop() }
+            guard let self, let command = packet.command else { return }
+            if let callID = packet.callID, let done = self.waiting.removeValue(forKey: callID) {
+                done(packet)
+            } else {
+                self.onCommand?(command)
+            }
         }
         self.link = link
         link.start()
     }
 
-    func setVolume(_ value: Double) {
-        volume = value
-        speaker.volume = value
+    func send(_ packet: Packet) {
+        link?.send(packet)
     }
 
-    func testVoice() {
-        link?.send(Packet(command: "testVoice"))
+    /// Sends a request to the Mac and calls back with its reply (nil if the Mac went away).
+    func request(_ packet: Packet, _ done: @escaping (Packet?) -> Void) {
+        guard let link, connected else { done(nil); return }
+        var packet = packet
+        let id = UUID().uuidString
+        packet.callID = id
+        waiting[id] = done
+        link.send(packet)
     }
 
     private static var deviceName: String {

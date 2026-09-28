@@ -13,8 +13,8 @@ final class PhoneServer {
     /// Called with the names of connected phones whenever that list changes.
     var onPhonesChanged: (([String]) -> Void)?
 
-    /// Called when a phone asks for something (test voice, new volume).
-    var onRequest: ((Packet) -> Void)?
+    /// Called when a phone asks for something. The second argument replies to that phone.
+    var onRequest: ((Packet, @escaping (Packet) -> Void) -> Void)?
 
     var phoneNames: [String] { phones.values.map { $0.name ?? "iPhone" } }
 
@@ -55,7 +55,7 @@ final class PhoneServer {
             case .ready:
                 self.pending[id] = nil
                 self.phones[id] = (link, nil)
-                link.send(Packet(hello: Host.current().localizedName ?? "Mac", volume: Settings.shared.volume))
+                link.send(Packet(hello: Host.current().localizedName ?? "Mac"))
                 if let face = self.lastSent { link.send(Packet(face: face)) }
                 self.onPhonesChanged?(self.phoneNames)
             case .failed, .cancelled:
@@ -72,26 +72,16 @@ final class PhoneServer {
                 self.phones[id]?.name = name
                 self.onPhonesChanged?(self.phoneNames)
             }
-            if packet.command != nil || packet.volume != nil { self.onRequest?(packet) }
+            if packet.command != nil {
+                self.onRequest?(packet) { [weak link] response in link?.send(response) }
+            }
         }
         link.start()
     }
 
-    /// Sends speech audio to the phones to play. Returns false when no phone is connected.
-    func sendSpeech(_ audio: Data, id: Int) -> Bool {
-        guard !phones.isEmpty else { return false }
-        let packet = Packet(audio: audio.base64EncodedString(), speech: id)
+    /// Sends a command to every phone (e.g. "wake", "sleep").
+    func broadcast(_ packet: Packet) {
         for phone in phones.values { phone.link.send(packet) }
-        return true
-    }
-
-    func stopSpeech() {
-        for phone in phones.values { phone.link.send(Packet(command: "stopSpeech")) }
-    }
-
-    /// Tells every phone the current volume (after it changes on the Mac).
-    func sendVolume(_ volume: Double) {
-        for phone in phones.values { phone.link.send(Packet(volume: volume)) }
     }
 
     /// Sends the face to every phone, skipping updates too small to see.

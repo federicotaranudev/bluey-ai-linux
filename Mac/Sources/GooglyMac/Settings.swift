@@ -36,18 +36,6 @@ final class Settings {
         set { defaults.set(newValue, forKey: "followMouse"); onChange?() }
     }
 
-    /// Play his voice from the phone's speaker when a phone is connected.
-    var voiceOnPhone: Bool {
-        get { defaults.object(forKey: "voiceOnPhone") as? Bool ?? true }
-        set { defaults.set(newValue, forKey: "voiceOnPhone"); onChange?() }
-    }
-
-    /// Voice volume, 0…1.
-    var volume: Double {
-        get { defaults.object(forKey: "volume") as? Double ?? 1 }
-        set { defaults.set(newValue, forKey: "volume") }
-    }
-
     var captions: Bool {
         get { defaults.object(forKey: "captions") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "captions"); onChange?() }

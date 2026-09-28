@@ -4,7 +4,7 @@ import Foundation
 /// never in the project folder or git. Unlike the Keychain, this never asks for your password.
 enum Keychain {
     enum Key: String {
-        case anthropic, elevenlabs
+        case anthropic, elevenlabs, openai
     }
 
     private static var cache: [String: String]?
