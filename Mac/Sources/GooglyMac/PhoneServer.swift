@@ -13,6 +13,9 @@ final class PhoneServer {
     /// Called with the names of connected phones whenever that list changes.
     var onPhonesChanged: (([String]) -> Void)?
 
+    /// Called when a phone asks for something (test voice, new volume).
+    var onRequest: ((Packet) -> Void)?
+
     var phoneNames: [String] { phones.values.map { $0.name ?? "iPhone" } }
 
     func start() {
@@ -52,7 +55,7 @@ final class PhoneServer {
             case .ready:
                 self.pending[id] = nil
                 self.phones[id] = (link, nil)
-                link.send(Packet(hello: Host.current().localizedName ?? "Mac"))
+                link.send(Packet(hello: Host.current().localizedName ?? "Mac", volume: Settings.shared.volume))
                 if let face = self.lastSent { link.send(Packet(face: face)) }
                 self.onPhonesChanged?(self.phoneNames)
             case .failed, .cancelled:
@@ -64,11 +67,19 @@ final class PhoneServer {
             }
         }
         link.onPacket = { [weak self] packet in
-            guard let self, let name = packet.hello, self.phones[id] != nil else { return }
-            self.phones[id]?.name = name
-            self.onPhonesChanged?(self.phoneNames)
+            guard let self, self.phones[id] != nil else { return }
+            if let name = packet.hello {
+                self.phones[id]?.name = name
+                self.onPhonesChanged?(self.phoneNames)
+            }
+            if packet.command != nil || packet.volume != nil { self.onRequest?(packet) }
         }
         link.start()
+    }
+
+    /// Tells every phone the current volume (after it changes on the Mac).
+    func sendVolume(_ volume: Double) {
+        for phone in phones.values { phone.link.send(Packet(volume: volume)) }
     }
 
     /// Sends the face to every phone, skipping updates too small to see.

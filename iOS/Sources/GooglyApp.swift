@@ -25,6 +25,8 @@ struct RootView: View {
                 .gesture(lookAtFinger)
                 .onTapGesture(count: 2) { cycleLocalMood() }
 
+            SoundButton(link: link)
+
             if showPairing && !link.connected {
                 PairingView { withAnimation(.easeOut(duration: 0.3)) { showPairing = false } }
                     .transition(.opacity)

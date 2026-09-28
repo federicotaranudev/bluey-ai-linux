@@ -9,6 +9,8 @@ import UIKit
 final class MacLink: ObservableObject {
     @Published private(set) var connected = false
     @Published private(set) var macName: String?
+    /// The Mac's voice volume, 0…1.
+    @Published var volume: Double = 1
 
     var onFace: ((FaceState) -> Void)?
 
@@ -74,9 +76,19 @@ final class MacLink: ObservableObject {
         link.onPacket = { [weak self] packet in
             if let name = packet.hello { self?.macName = name }
             if let face = packet.face { self?.onFace?(face) }
+            if let volume = packet.volume { self?.volume = volume }
         }
         self.link = link
         link.start()
+    }
+
+    func setVolume(_ value: Double) {
+        volume = value
+        link?.send(Packet(volume: value))
+    }
+
+    func testVoice() {
+        link?.send(Packet(command: "testVoice"))
     }
 
     private static var deviceName: String {

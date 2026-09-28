@@ -22,6 +22,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlay.onFace = { [weak self] face in self?.server.send(face) }
         overlay.start()
         server.onPhonesChanged = { [weak self] _ in self?.refreshIcon() }
+        server.onRequest = { [weak self] packet in
+            guard let self else { return }
+            if let volume = packet.volume {
+                self.settings.volume = min(1, max(0, volume))
+                self.conductor.voice.applyVolume()
+            }
+            if packet.command == "testVoice" { self.conductor.testVoice() }
+        }
         server.start()
 
         // ⌃⌥P point here, ⌃⌥F follow mouse, ⌃⌥D dock, ⌃⌥H hide, ⌃⌥T talk test.
@@ -77,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func volumeChanged(_ slider: NSSlider) {
         settings.volume = slider.doubleValue
         conductor.voice.applyVolume()
+        server.sendVolume(settings.volume)
     }
 
     @objc private func testVoice() { conductor.testVoice() }

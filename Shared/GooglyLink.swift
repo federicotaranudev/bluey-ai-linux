@@ -34,10 +34,16 @@ public struct Packet: Codable, Sendable {
     public var face: FaceState?
     /// Sent once by each side after connecting, with a device name.
     public var hello: String?
+    /// Voice volume 0…1. The Mac shares it, the phone sets it.
+    public var volume: Double?
+    /// A request from the phone, e.g. "testVoice".
+    public var command: String?
 
-    public init(face: FaceState? = nil, hello: String? = nil) {
+    public init(face: FaceState? = nil, hello: String? = nil, volume: Double? = nil, command: String? = nil) {
         self.face = face
         self.hello = hello
+        self.volume = volume
+        self.command = command
     }
 }
 
