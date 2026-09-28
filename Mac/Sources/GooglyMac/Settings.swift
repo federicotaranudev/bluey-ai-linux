@@ -41,6 +41,12 @@ final class Settings {
         set { defaults.set(newValue, forKey: "captions"); onChange?() }
     }
 
+    /// How the cursor's path shows while it flies.
+    var trail: PointerTrail {
+        get { PointerTrail(rawValue: defaults.string(forKey: "trail") ?? "") ?? .comet }
+        set { defaults.set(newValue.rawValue, forKey: "trail"); onChange?() }
+    }
+
     /// The mood picked by hand in the menu.
     var mood: Mood {
         get { Mood(rawValue: defaults.string(forKey: "mood") ?? "") ?? .listening }

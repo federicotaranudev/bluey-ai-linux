@@ -1,14 +1,28 @@
 import AppKit
+import QuartzCore
 import GooglyShared
 
 /// Where the big character cursor wants to be.
 enum CursorMode: Equatable {
-    /// Waiting at the bottom edge of the screen, right above the phone.
+    /// Parked at the bottom edge of the screen, peeking up above the phone.
     case docked
-    /// Hidden at home; the phone's eyes follow your own mouse instead.
+    /// Tucked out of sight below the screen; the phone's eyes follow your own mouse instead.
     case following
-    /// Flew to a spot and stays there while you move the mouse away.
+    /// Flew to a spot and stays there.
     case pinned(CGPoint)
+}
+
+/// How the cursor's path shows while it flies.
+enum PointerTrail: String, CaseIterable {
+    case comet, string, none
+
+    var title: String {
+        switch self {
+        case .comet: return "Comet Trail"
+        case .string: return "String to the Phone"
+        case .none: return "No Trail"
+        }
+    }
 }
 
 extension NSColor {
@@ -18,240 +32,304 @@ extension NSColor {
     }
 }
 
-/// A click-through, transparent window over the whole main screen that draws the cursor.
-final class CursorOverlay {
-    let view = CursorView()
-    private var window: NSWindow?
-    private var timer: Timer?
-    private var lastTick = CACurrentMediaTime()
+// MARK: - Motion
 
-    /// Called every frame with the face the phone should show.
-    var onFace: ((FaceState) -> Void)?
+/// A CSS-style cubic-bezier timing curve: maps time (0…1) to progress (0…1).
+struct TimingCurve {
+    let x1: Double, y1: Double, x2: Double, y2: Double
 
-    var mode: CursorMode {
-        get { view.engine.mode }
-        set { view.engine.setMode(newValue) }
+    /// Starts gently, then arrives with a long, soft deceleration.
+    static let launch = TimingCurve(x1: 0.36, y1: 0, x2: 0.18, y2: 1)
+    /// Keeps the speed it already had (for a change of plans mid-flight), then settles the same way.
+    static let redirect = TimingCurve(x1: 0.25, y1: 0.25, x2: 0.18, y2: 1)
+    /// Even and deliberate, for drags.
+    static let steady = TimingCurve(x1: 0.42, y1: 0, x2: 0.38, y2: 1)
+
+    private func coordinate(_ t: Double, _ a: Double, _ b: Double) -> Double {
+        let u = 1 - t
+        return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t
     }
 
-    /// Where the cursor rests when nobody is pointing: hidden with eyes on your mouse, or parked above the phone.
-    var idleMode: CursorMode { Settings.shared.followMouse ? .following : .docked }
+    private func derivative(_ t: Double, _ a: Double, _ b: Double) -> Double {
+        let u = 1 - t
+        return 3 * u * u * a + 6 * u * t * (b - a) + 3 * t * t * (1 - b)
+    }
 
-    func goHome() { mode = idleMode }
-
-    func start() {
-        mode = idleMode
-        makeWindow()
-        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
-                                               object: nil, queue: .main) { [weak self] _ in
-            self?.makeWindow()
+    private func parameter(for x: Double) -> Double {
+        var t = x
+        for _ in 0..<8 {
+            let error = coordinate(t, x1, x2) - x
+            if abs(error) < 1e-7 { return t }
+            let d = derivative(t, x1, x2)
+            if abs(d) < 1e-7 { break }
+            t -= error / d
         }
-        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in self?.tick() }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
-    }
-
-    func talkTest(seconds: Double = 3) {
-        view.engine.talkUntil = CACurrentMediaTime() + seconds
-    }
-
-    private func makeWindow() {
-        guard let screen = NSScreen.screens.first else { return }
-        if let window {
-            window.setFrame(screen.frame, display: true)
-            return
+        var low = 0.0, high = 1.0
+        t = x
+        for _ in 0..<40 {
+            let value = coordinate(t, x1, x2)
+            if abs(value - x) < 1e-7 { break }
+            if value < x { low = t } else { high = t }
+            t = (low + high) / 2
         }
-        let window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        window.ignoresMouseEvents = true
-        window.level = .screenSaver
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        window.contentView = view
-        window.orderFrontRegardless()
-        self.window = window
+        return t
     }
 
-    private func tick() {
-        guard let window else { return }
-        let now = CACurrentMediaTime()
-        let dt = min(now - lastTick, 1.0 / 20.0)
-        lastTick = now
+    func value(at x: Double) -> Double {
+        if x <= 0 { return 0 }
+        if x >= 1 { return 1 }
+        return coordinate(parameter(for: x), y1, y2)
+    }
 
-        // Mouse position in the view's top-left, y-down coordinates.
-        let m = NSEvent.mouseLocation
-        let f = window.frame
-        let mouse = CGPoint(x: m.x - f.minX, y: f.maxY - m.y)
-
-        view.step(dt: dt, now: now, mouse: mouse)
-        onFace?(view.engine.face(in: view.bounds.size, now: now))
+    /// How fast progress changes with time at `x`.
+    func rate(at x: Double) -> Double {
+        let t = parameter(for: min(max(x, 0), 1))
+        let dx = derivative(t, x1, x2), dy = derivative(t, y1, y2)
+        return dx > 1e-7 ? dy / dx : 0
     }
 }
 
-/// The physics and state behind the cursor. Coordinates are top-left origin, y down.
+/// One planned trip: a smooth cubic curve walked with an easing curve.
+private struct Flight {
+    let from: CGPoint, c1: CGPoint, c2: CGPoint, to: CGPoint
+    let start: Double, duration: Double
+    let timing: TimingCurve
+    /// It was sent to point at something (not heading home).
+    let pointing: Bool
+    var landed = false
+
+    func progress(_ now: Double) -> Double {
+        duration <= 0 ? 1 : min(1, max(0, (now - start) / duration))
+    }
+
+    func position(_ e: CGFloat) -> CGPoint {
+        let u = 1 - e
+        let a = u * u * u, b = 3 * u * u * e, c = 3 * u * e * e, d = e * e * e
+        return CGPoint(x: a * from.x + b * c1.x + c * c2.x + d * to.x,
+                       y: a * from.y + b * c1.y + c * c2.y + d * to.y)
+    }
+
+    func tangent(_ e: CGFloat) -> CGPoint {
+        let u = 1 - e
+        let a = 3 * u * u, b = 6 * u * e, c = 3 * e * e
+        return CGPoint(x: a * (c1.x - from.x) + b * (c2.x - c1.x) + c * (to.x - c2.x),
+                       y: a * (c1.y - from.y) + b * (c2.y - c1.y) + c * (to.y - c2.y))
+    }
+}
+
+/// Where the cursor is and how it moves. Coordinates are top-left origin, y down, in points.
 final class CursorEngine {
-    private(set) var mode: CursorMode = .docked
-    var tip = CGPoint(x: -500, y: -500)
+    private(set) var mode: CursorMode = .following
+    private(set) var tip = CGPoint(x: -1000, y: -1000)
     private(set) var velocity = CGVector.zero
-    var angle: CGFloat = .pi / 4
+    private(set) var angle: CGFloat = .pi / 4
     private var angleVelocity: CGFloat = 0
+    private(set) var opacity: CGFloat = 0
+    private var flight: Flight?
     private var placed = false
-    /// Fades the cursor out while the eyes are just following your mouse.
-    var opacity: CGFloat = 0
-    private var mouse = CGPoint.zero
+    private(set) var bounds = CGSize(width: 1440, height: 900)
+    /// Drags move slower and in a straight, steady line.
+    var dragging = false
 
-    struct Dot { var point: CGPoint; var born: Double; var size: CGFloat; var color: UInt32 }
-    struct Ring { var point: CGPoint; var born: Double }
-    struct Sparkle { var point: CGPoint; var velocity: CGVector; var born: Double; var size: CGFloat; var spin: CGFloat }
-    var sparkles: [Sparkle] = []
-    /// When it last landed on a spot (for the little "click" squish).
-    var landedAt = -10.0
-    var trail: [Dot] = []
-    var rings: [Ring] = []
-    private var lastDot = 0.0
-    private var ringPending = false
-
-    // A planned flight: an eased arc from where it was to where it's going.
-    private var flightFrom = CGPoint.zero
-    private var flightControl = CGPoint.zero
-    private var flightTo = CGPoint(x: -9999, y: -9999)
-    private var flightStart = 0.0
-    private var flightDuration = 1.0
+    /// Called when a flight lands on a spot it was sent to point at.
+    var onLand: ((CGPoint) -> Void)?
+    /// Called when it pops out of the phone or dives back in (a point on the bottom edge).
+    var onLaunch: ((CGPoint) -> Void)?
+    private(set) var landedAt = -10.0
+    private var pressStart = -10.0
+    private var pressDepth: CGFloat = 0
 
     var talkUntil = 0.0
-    /// Set by the conductor while listening, thinking or talking.
+    /// Set while he's listening, thinking or talking.
     var brainMood: Mood?
-    /// Where the phone's eyes should look instead of at the cursor (e.g. at you while listening).
+    /// Where the phone's eyes should look instead of at the cursor (e.g. at you while he listens).
     var gazeOverride: CGPoint?
     /// True while he's awake and talking with you (no dozing off then).
     var awake = false
+    private var mouse = CGPoint.zero
     private var lastMouseMove = CACurrentMediaTime()
     /// Live voice loudness, 0…1.
     var talkLevel: () -> Double = { 0 }
-    var blinkUntil = 0.0
+    private(set) var blinkUntil = 0.0
     private var nextBlink = CACurrentMediaTime() + 3
 
     let settings = Settings.shared
     var size: CGFloat { CGFloat(settings.cursorSize) }
 
-    func setMode(_ newMode: CursorMode) {
-        mode = newMode
-        if case .pinned = newMode { ringPending = true }
+    func setMode(_ newMode: CursorMode) { mode = newMode }
+
+    var isHome: Bool {
+        if case .pinned = mode { return false }
+        return true
     }
 
     /// Where the phone sits, just below the bottom edge of the screen.
-    func phonePoint(in bounds: CGSize) -> CGPoint {
-        CGPoint(x: bounds.width * settings.phonePosition, y: bounds.height + bounds.height * 0.18)
+    func phonePoint(in b: CGSize) -> CGPoint {
+        CGPoint(x: b.width * settings.phonePosition, y: b.height + b.height * 0.18)
     }
 
-    func dockPoint(in bounds: CGSize) -> CGPoint {
-        CGPoint(x: bounds.width * settings.phonePosition, y: bounds.height - size * 0.42)
+    /// Peeking up from the bottom edge, right above the phone.
+    func dockPoint(in b: CGSize) -> CGPoint {
+        CGPoint(x: b.width * settings.phonePosition, y: b.height - size * 0.42)
+    }
+
+    /// Just below the bottom edge, out of sight, as if tucked into the phone.
+    func tuckedPoint(in b: CGSize) -> CGPoint {
+        CGPoint(x: b.width * settings.phonePosition, y: b.height + size * 0.35)
+    }
+
+    private func goal() -> CGPoint {
+        switch mode {
+        case .docked: return dockPoint(in: bounds)
+        case .following: return tuckedPoint(in: bounds)
+        case .pinned(let p): return p
+        }
+    }
+
+    /// Seconds until the current trip arrives.
+    func timeToArrive(_ now: Double) -> Double {
+        guard let flight else { return 0 }
+        return max(0, flight.start + flight.duration - now)
+    }
+
+    /// A little squish toward the tip, like pressing a button.
+    func press(depth: CGFloat, at now: Double = CACurrentMediaTime()) {
+        pressStart = now
+        pressDepth = depth
     }
 
     func step(dt: Double, now: Double, mouse: CGPoint, bounds: CGSize) {
-        let target: CGPoint
-        switch mode {
-        case .docked: target = dockPoint(in: bounds)
-        case .following: target = dockPoint(in: bounds)
-        case .pinned(let p): target = p
-        }
+        self.bounds = bounds
         if hypot(mouse.x - self.mouse.x, mouse.y - self.mouse.y) > 1.5 { lastMouseMove = now }
         self.mouse = mouse
         if !placed {
-            tip = dockPoint(in: bounds)
+            tip = tuckedPoint(in: bounds)
             placed = true
         }
 
+        let target = goal()
+        let needsPlan: Bool
+        if let flight {
+            needsPlan = hypot(flight.to.x - target.x, flight.to.y - target.y) > 0.5
+        } else {
+            needsPlan = hypot(tip.x - target.x, tip.y - target.y) > 0.5
+        }
+        if needsPlan { plan(to: target, now: now) }
+        advance(now)
+
+        // Fades in the moment it leaves home; in follow mode it fades out once it has tucked itself away.
+        let settled = (flight?.progress(now) ?? 1) >= 1
+        let wantOpacity: CGFloat = (mode == .following && settled) ? 0 : 1
+        let rate = wantOpacity > opacity ? 12.0 : 6.0
+        opacity += (wantOpacity - opacity) * CGFloat(min(1, dt * rate))
+
+        // Upright like a normal cursor while out and about (tipped up when parked), leaning a touch into the motion.
+        let lean = max(-0.2, min(0.2, velocity.dx / 2800))
+        let targetAngle: CGFloat = (isHome ? .pi / 4 : 0) + lean
+        let k: CGFloat = 38
         let t = CGFloat(dt)
-        fly(toward: target, now: now)
-
-        // Visible whenever it's pointing or parked; in follow mode it fades out once it's home.
-        let nearHome = hypot(tip.x - target.x, tip.y - target.y) < 12
-        let wantOpacity: CGFloat = (mode == .following && nearHome) ? 0 : 1
-        opacity += (wantOpacity - opacity) * min(1, t * (wantOpacity > opacity ? 14 : 6))
-
-        // The tip points away from the phone, so it always reads as the character pointing.
-        let phone = phonePoint(in: bounds)
-        let away = CGVector(dx: tip.x - phone.x, dy: tip.y - phone.y)
-        let home: Bool
-        switch mode { case .docked, .following: home = true; case .pinned: home = false }
-        let targetAngle = home ? .pi / 4 : atan2(-away.dy, -away.dx) - .pi / 4
-        let ka: CGFloat = 45
-        angleVelocity += (ka * (targetAngle - angle) - 2 * sqrt(ka) * 1.0 * angleVelocity) * t
+        angleVelocity += (k * (targetAngle - angle) - 2 * sqrt(k) * angleVelocity) * t
         angle += angleVelocity * t
 
-        // Bubble trail while flying fast.
-        let speed = hypot(velocity.dx, velocity.dy)
-        if speed > 1100, now - lastDot > 0.05 {
-            lastDot = now
-            let colors = [Palette.berry1, Palette.berry2, Palette.berry3]
-            trail.append(Dot(point: bodyCenter, born: now, size: size * CGFloat.random(in: 0.12...0.2),
-                             color: colors.randomElement()!))
-        }
-        trail.removeAll { now - $0.born > 0.45 }
-
-        // A soft ring when it lands on a pinned spot.
-        if ringPending, flightProgress(now) >= 1 {
-            ringPending = false
-            rings.append(Ring(point: tip, born: now))
-            landedAt = now
-            // A burst of tiny stars, like he just clicked on it.
-            for i in 0..<7 {
-                let a = Double(i) / 7 * 2 * .pi + .random(in: -0.3...0.3)
-                let speed = CGFloat.random(in: 140...260)
-                sparkles.append(Sparkle(point: tip, velocity: CGVector(dx: cos(a) * speed, dy: sin(a) * speed),
-                                        born: now, size: .random(in: 7...13), spin: .random(in: -4...4)))
-            }
-        }
-        rings.removeAll { now - $0.born > 0.9 }
-        for i in sparkles.indices {
-            sparkles[i].point.x += sparkles[i].velocity.dx * t
-            sparkles[i].point.y += sparkles[i].velocity.dy * t
-            sparkles[i].velocity.dx *= 0.9
-            sparkles[i].velocity.dy = sparkles[i].velocity.dy * 0.9 + 200 * t
-        }
-        sparkles.removeAll { now - $0.born > 0.7 }
-
         if now > nextBlink {
-            blinkUntil = now + 0.12
-            nextBlink = now + Double.random(in: 2.5...6)
+            blinkUntil = now + 0.13
+            nextBlink = now + .random(in: 2.5...6)
         }
     }
 
-    private func flightProgress(_ now: Double) -> Double {
-        min(1, max(0, (now - flightStart) / flightDuration))
+    /// Plans a natural-looking trip: a gentle curve, timed like a real hand movement (longer trips take
+    /// a bit longer, but not proportionally), with a smooth start and a long, soft landing.
+    private func plan(to goal: CGPoint, now: Double) {
+        let from = tip
+        let dx = goal.x - from.x, dy = goal.y - from.y
+        let distance = hypot(dx, dy)
+        let pointing = !isHome
+        let dock = dockPoint(in: bounds)
+        let fromHome = hypot(from.x - dock.x, from.y - dock.y) < size * 1.2 || from.y > bounds.height - 2
+        guard distance > 0.5 else {
+            flight = Flight(from: from, c1: from, c2: goal, to: goal, start: now, duration: 0, timing: .launch, pointing: pointing)
+            return
+        }
+
+        var duration = min(1.2, max(0.45, 0.34 + 0.11 * log2(1 + Double(distance) / 24)))
+        if dragging { duration = min(1.6, max(0.6, duration * 1.45)) }
+
+        let direction = CGPoint(x: dx / distance, y: dy / distance)
+        var normal = CGPoint(x: -direction.y, y: direction.x)
+        if abs(direction.x) > 0.4 {
+            if normal.y > 0 { normal = CGPoint(x: -normal.x, y: -normal.y) }  // sideways trips bow gently upward
+        } else {
+            let towardMiddle: CGFloat = bounds.width / 2 - (from.x + goal.x) / 2 >= 0 ? 1 : -1
+            if normal.x * towardMiddle < 0 { normal = CGPoint(x: -normal.x, y: -normal.y) }  // vertical trips bow toward the middle
+        }
+        let bow = dragging ? 0 : min(distance * 0.1, 70) * 0.75
+        let reach = distance * 0.3
+        let c2 = CGPoint(x: goal.x - direction.x * reach + normal.x * bow,
+                         y: goal.y - direction.y * reach + normal.y * bow)
+
+        let speed = hypot(velocity.dx, velocity.dy)
+        let c1: CGPoint
+        let timing: TimingCurve
+        if speed > 60 {
+            // A change of plans mid-flight: carry on from the current speed and heading, no kink.
+            var carry = CGPoint(x: velocity.dx * CGFloat(duration) / 3, y: velocity.dy * CGFloat(duration) / 3)
+            let length = hypot(carry.x, carry.y)
+            if length > distance * 0.6 {
+                carry = CGPoint(x: carry.x / length * distance * 0.6, y: carry.y / length * distance * 0.6)
+            }
+            c1 = CGPoint(x: from.x + carry.x, y: from.y + carry.y)
+            timing = .redirect
+        } else {
+            c1 = CGPoint(x: from.x + direction.x * reach + normal.x * bow,
+                         y: from.y + direction.y * reach + normal.y * bow)
+            timing = dragging ? .steady : .launch
+        }
+        flight = Flight(from: from, c1: c1, c2: c2, to: goal, start: now, duration: duration, timing: timing, pointing: pointing)
+        if pointing && fromHome { onLaunch?(CGPoint(x: dock.x, y: bounds.height)) }
     }
 
-    /// Glides along a gentle arc with smooth acceleration and a soft landing (no springy wobble).
-    private func fly(toward target: CGPoint, now: Double) {
-        if hypot(target.x - flightTo.x, target.y - flightTo.y) > 1 {
-            let distance = hypot(target.x - tip.x, target.y - tip.y)
-            flightFrom = tip
-            flightTo = target
-            flightStart = now
-            // Longer trips take a little longer, but never feel sluggish.
-            flightDuration = min(1.15, max(0.45, 0.42 + Double(distance) / 2300))
-            // Bow the path upward like a lob, and carry on in the direction it was already moving.
-            let mid = CGPoint(x: (tip.x + target.x) / 2, y: (tip.y + target.y) / 2)
-            let dx = target.x - tip.x, dy = target.y - tip.y
-            var normal = CGPoint(x: -dy, y: dx)
-            if normal.y > 0 { normal = CGPoint(x: -normal.x, y: -normal.y) }  // always bow upward
-            let len = max(hypot(normal.x, normal.y), 1)
-            let bow = min(distance * 0.16, 140)
-            let carry = CGFloat(flightDuration) * 0.22
-            flightControl = CGPoint(x: mid.x + normal.x / len * bow + velocity.dx * carry,
-                                    y: mid.y + normal.y / len * bow + velocity.dy * carry)
+    private func advance(_ now: Double) {
+        guard var flight else {
+            velocity = .zero
+            return
         }
-        let p = flightProgress(now)
-        // Smootherstep: zero speed and zero acceleration at both ends.
-        let e = CGFloat(p * p * p * (p * (p * 6 - 15) + 10))
-        let de = CGFloat(30 * p * p * (p - 1) * (p - 1) / flightDuration)
-        let u = 1 - e
-        let a = flightFrom, c = flightControl, b = flightTo
-        tip = CGPoint(x: u * u * a.x + 2 * u * e * c.x + e * e * b.x,
-                      y: u * u * a.y + 2 * u * e * c.y + e * e * b.y)
-        let d = CGPoint(x: 2 * u * (c.x - a.x) + 2 * e * (b.x - c.x), y: 2 * u * (c.y - a.y) + 2 * e * (b.y - c.y))
-        velocity = CGVector(dx: d.x * de, dy: d.y * de)
+        let p = flight.progress(now)
+        let e = CGFloat(flight.timing.value(at: p))
+        tip = flight.position(e)
+        if p >= 1 {
+            velocity = .zero
+            if !flight.landed {
+                flight.landed = true
+                self.flight = flight
+                if flight.pointing {
+                    landedAt = now
+                    onLand?(tip)
+                } else if mode == .following {
+                    onLaunch?(CGPoint(x: tip.x, y: bounds.height))
+                }
+            }
+        } else {
+            let rate = CGFloat(flight.timing.rate(at: p) / flight.duration)
+            let d = flight.tangent(e)
+            velocity = CGVector(dx: d.x * rate, dy: d.y * rate)
+        }
+    }
+
+    /// Scale for the press squish: a quick press, then a spring back with the tiniest rebound.
+    func pressScale(_ now: Double) -> CGFloat {
+        let t = now - pressStart
+        guard t >= 0, t < 0.42 else { return 1 }
+        if t < 0.12 { return 1 - pressDepth * CGFloat(sin(t / 0.12 * .pi / 2)) }
+        let r = (t - 0.12) / 0.3
+        return 1 - pressDepth * CGFloat(cos(r * .pi * 1.5) * exp(-r * 3.2))
+    }
+
+    /// A slow, gentle hover while it holds a point (eased in so it never jumps).
+    func hover(_ now: Double) -> CGFloat {
+        guard !isHome, (flight?.progress(now) ?? 1) >= 1 else { return 0 }
+        let since = now - landedAt
+        let amount = CGFloat(min(1, max(0, (since - 0.35) / 0.6)))
+        return CGFloat(sin(since * 2.4)) * 1.6 * amount
     }
 
     var bodyCenter: CGPoint {
@@ -259,7 +337,7 @@ final class CursorEngine {
         return CGPoint(x: tip.x + cos(angle + .pi / 4) * r, y: tip.y + sin(angle + .pi / 4) * r)
     }
 
-    /// Eyes on the phone look at the cursor.
+    /// What the phone's face should do: look at the cursor (or at your mouse in follow mode).
     func face(in bounds: CGSize, now: Double) -> FaceState {
         let phone = phonePoint(in: bounds)
         let c = mode == .following ? mouse : bodyCenter
@@ -285,26 +363,515 @@ final class CursorEngine {
     }
 }
 
-final class CursorView: NSView {
-    let engine = CursorEngine()
-    private var lastDirty = CGRect.null
-    private var captionText: NSAttributedString?
-    private var captionRect = CGRect.null
+// MARK: - Drawing
 
-    /// Live caption shown near the bottom of the screen while he talks.
-    var caption: String? {
-        didSet {
-            guard caption != oldValue else { return }
-            setNeedsDisplay(captionRect.insetBy(dx: -4, dy: -4))
-            layoutCaption()
-            setNeedsDisplay(captionRect.insetBy(dx: -4, dy: -4))
+enum Teardrop {
+    /// A square with three fully rounded corners and one sharp one (the tip) at the origin. y down.
+    static func path(size s: CGFloat, tipRadius r: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        let big = s / 2
+        path.move(to: CGPoint(x: r, y: 0))
+        path.addArc(tangent1End: CGPoint(x: s, y: 0), tangent2End: CGPoint(x: s, y: s), radius: big)
+        path.addArc(tangent1End: CGPoint(x: s, y: s), tangent2End: CGPoint(x: 0, y: s), radius: big)
+        path.addArc(tangent1End: CGPoint(x: 0, y: s), tangent2End: CGPoint(x: 0, y: 0), radius: big)
+        path.addArc(tangent1End: CGPoint(x: 0, y: 0), tangent2End: CGPoint(x: s, y: 0), radius: r)
+        path.closeSubpath()
+        return path
+    }
+
+    static func star(radius: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        for i in 0..<8 {
+            let r = i % 2 == 0 ? radius : radius * 0.4
+            let a = CGFloat(i) * .pi / 4 - .pi / 2
+            let p = CGPoint(x: cos(a) * r, y: sin(a) * r)
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The cursor's body, drawn once (gradient, shine, white rim, soft glow) and then just moved around.
+final class TeardropLayer: CALayer {
+    var side: CGFloat = 72
+    var glow = true
+    var padding: CGFloat { side * 0.45 }
+
+    override init() {
+        super.init()
+        needsDisplayOnBoundsChange = true
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+        if let other = layer as? TeardropLayer {
+            side = other.side
+            glow = other.glow
         }
     }
 
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func draw(in ctx: CGContext) {
+        let s = side, k = s / 96
+        // Draw top-down (y down) so the art matches the rest of the app's coordinates.
+        ctx.translateBy(x: 0, y: bounds.height)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.translateBy(x: padding, y: padding)
+        let path = Teardrop.path(size: s, tipRadius: 6 * k)
+
+        ctx.saveGState()
+        if glow {
+            ctx.setShadow(offset: .zero, blur: 30 * k, color: NSColor(hex: Palette.berry2, alpha: 0.7).cgColor)
+        } else {
+            ctx.setShadow(offset: .zero, blur: 16 * k, color: NSColor(hex: Palette.berry4, alpha: 0.45).cgColor)
+        }
+        ctx.addPath(path)
+        ctx.setFillColor(NSColor.white.cgColor)
+        ctx.fillPath()
+        ctx.restoreGState()
+
+        ctx.saveGState()
+        ctx.addPath(path)
+        ctx.clip()
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let colors = Palette.gradient.map { NSColor(hex: $0).cgColor } as CFArray
+        if let gradient = CGGradient(colorsSpace: space, colors: colors, locations: Palette.gradientStops.map { CGFloat($0) }) {
+            ctx.drawLinearGradient(gradient, start: CGPoint(x: 0.25 * s, y: 0.067 * s), end: CGPoint(x: 0.75 * s, y: 0.933 * s),
+                                   options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        }
+        let shine = [NSColor(white: 1, alpha: 0.55).cgColor, NSColor(white: 1, alpha: 0).cgColor] as CFArray
+        if let gradient = CGGradient(colorsSpace: space, colors: shine, locations: [0, 1]) {
+            let c = CGPoint(x: 0.3 * s, y: 0.24 * s)
+            ctx.drawRadialGradient(gradient, startCenter: c, startRadius: 0, endCenter: c, endRadius: 0.38 * s, options: [])
+        }
+        ctx.addPath(path)
+        ctx.setStrokeColor(NSColor.white.cgColor)
+        ctx.setLineWidth(8 * k)  // half is clipped away, leaving a 4 pt rim
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+}
+
+/// Everything on the overlay, as Core Animation layers so the GPU composites it smoothly every frame.
+/// Layer space is y-up (bottom-left origin); the engine works y-down, so positions go through `layerPoint`.
+final class CursorView: NSView {
+    let engine = CursorEngine()
+
+    private let root = CALayer()
+    private let stringLayer = CAShapeLayer()
+    private let trailLayer = CAShapeLayer()
+    private let effects = CALayer()
+    private let cursor = CALayer()
+    private let body = TeardropLayer()
+    private var eyes: [(socket: CALayer, white: CAShapeLayer, pupil: CAShapeLayer)] = []
+    private let bubbles = CALayer()
+    private let captionBox = CALayer()
+    private let captionText = CATextLayer()
+
+    private var builtArt: (side: CGFloat, glow: Bool, scale: CGFloat)?
+    private var scale: CGFloat = 2
+    private var samples: [(point: CGPoint, time: Double)] = []
+    private var lastTwinkle = 0.0
+    private var look = CGPoint(x: -0.7, y: -0.7)
+    private var stringMid: CGPoint?
+    private var stringMidVelocity = CGVector.zero
+    private var activeBubbles: [(layer: CALayer, born: Double, life: Double)] = []
+
+    /// Live caption shown near the bottom of the screen while he talks.
+    var caption: String? {
+        didSet { if caption != oldValue { layoutCaption() } }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        layer = root
+        wantsLayer = true
+        root.masksToBounds = false
+
+        stringLayer.fillColor = nil
+        stringLayer.lineCap = .round
+        stringLayer.lineWidth = 2.5
+        stringLayer.strokeColor = NSColor(hex: Palette.berry1, alpha: 0.7).cgColor
+        trailLayer.fillColor = NSColor(hex: Palette.berry2, alpha: 1).cgColor
+        for l in [stringLayer, trailLayer, effects, cursor, bubbles, captionBox] { root.addSublayer(l) }
+
+        cursor.anchorPoint = CGPoint(x: 0, y: 1)  // the tip: top-left corner in y-up space
+        cursor.addSublayer(body)
+        for _ in 0..<2 {
+            let socket = CALayer()
+            let white = CAShapeLayer()
+            let pupil = CAShapeLayer()
+            white.fillColor = NSColor.white.cgColor
+            pupil.fillColor = NSColor(hex: Palette.ink).cgColor
+            socket.addSublayer(white)
+            socket.addSublayer(pupil)
+            cursor.addSublayer(socket)
+            eyes.append((socket, white, pupil))
+        }
+
+        captionBox.backgroundColor = NSColor(hex: Palette.ink, alpha: 0.86).cgColor
+        captionBox.cornerRadius = 22
+        captionBox.opacity = 0
+        captionText.isWrapped = true
+        captionText.alignmentMode = .center
+        captionBox.addSublayer(captionText)
+
+        engine.onLand = { [weak self] point in self?.softLand(at: point) }
+        engine.onLaunch = { [weak self] point in self?.puff(at: point) }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        root.frame = bounds
+        for l in [stringLayer, trailLayer, effects, bubbles] { l.frame = bounds }
+        CATransaction.commit()
+        layoutCaption()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        setScale(window?.backingScaleFactor ?? 2)
+    }
+
+    /// Pixel density for crisp drawing (also used by the preview renderer).
+    func setScale(_ newScale: CGFloat) {
+        scale = newScale
+        for l in [root, stringLayer, trailLayer, cursor, body, captionBox, captionText] { l.contentsScale = scale }
+        for eye in eyes { [eye.white, eye.pupil].forEach { $0.contentsScale = scale } }
+        builtArt = nil
+    }
+
+    private func layerPoint(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x, y: bounds.height - p.y) }
+
+    // MARK: Frame
+
+    func step(dt: Double, now: Double, mouse: CGPoint) {
+        engine.step(dt: dt, now: now, mouse: mouse, bounds: bounds.size)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        render(now: now, dt: dt)
+        CATransaction.commit()
+    }
+
+    private func buildArtIfNeeded() {
+        let side = engine.size
+        let glow = Settings.shared.glow
+        if let art = builtArt, art.side == side, art.glow == glow, art.scale == scale { return }
+        builtArt = (side, glow, scale)
+        let k = side / 96
+        cursor.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        body.side = side
+        body.glow = glow
+        body.contentsScale = scale
+        body.frame = CGRect(x: -body.padding, y: -body.padding, width: side + body.padding * 2, height: side + body.padding * 2)
+        body.setNeedsDisplay()
+        body.displayIfNeeded()
+        for (i, eye) in eyes.enumerated() {
+            let d = 18 * k
+            let x = (34 + CGFloat(i) * 24) * k, y = 40 * k  // design position, y down
+            eye.socket.bounds = CGRect(x: 0, y: 0, width: d, height: d)
+            eye.socket.position = CGPoint(x: x + d / 2, y: side - (y + d / 2))
+            eye.white.frame = eye.socket.bounds
+            eye.white.path = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: d, height: d), transform: nil)
+            let p = 9 * k
+            eye.pupil.bounds = .zero
+            eye.pupil.path = CGPath(ellipseIn: CGRect(x: -p / 2, y: -p / 2, width: p, height: p), transform: nil)
+        }
+    }
+
+    private func render(now: Double, dt: Double) {
+        buildArtIfNeeded()
+        let settings = Settings.shared
+        let k = engine.size / 96
+        let visible = settings.showCursor
+
+        // The cursor itself.
+        cursor.position = layerPoint(CGPoint(x: engine.tip.x, y: engine.tip.y + engine.hover(now)))
+        let squish = engine.pressScale(now)
+        cursor.transform = CATransform3DConcat(CATransform3DMakeScale(squish, squish, 1),
+                                               CATransform3DMakeRotation(-engine.angle, 0, 0, 1))
+        cursor.opacity = Float(visible ? engine.opacity : 0)
+
+        // Its eyes look where it's heading, and back at the tip when it stops. They blink now and then.
+        let v = engine.velocity
+        let speed = hypot(v.dx, v.dy)
+        var wantLook = CGPoint(x: -0.7, y: -0.7)
+        if speed > 90 {
+            let a = -engine.angle
+            let local = CGPoint(x: v.dx * cos(a) - v.dy * sin(a), y: v.dx * sin(a) + v.dy * cos(a))
+            let n = max(hypot(local.x, local.y), 1)
+            wantLook = CGPoint(x: local.x / n, y: local.y / n)
+        }
+        let follow = CGFloat(min(1, dt * 12))
+        look = CGPoint(x: look.x + (wantLook.x - look.x) * follow, y: look.y + (wantLook.y - look.y) * follow)
+        let blinking = now < engine.blinkUntil
+        for eye in eyes {
+            let d = 18 * k
+            eye.pupil.position = CGPoint(x: d / 2 + look.x * 3.4 * k, y: d / 2 - look.y * 3.4 * k)
+            eye.socket.transform = CATransform3DMakeScale(1, blinking ? 0.12 : 1, 1)
+        }
+
+        renderTrail(now: now, speed: speed, visible: visible)
+        renderString(now: now, dt: dt, visible: visible)
+        renderBubbles(now: now)
+    }
+
+    private func renderTrail(now: Double, speed: CGFloat, visible: Bool) {
+        let center = engine.bodyCenter
+        samples.append((center, now))
+        samples.removeAll { now - $0.time > 0.2 }
+        guard visible, Settings.shared.trail == .comet, samples.count > 2, speed > 260 else {
+            trailLayer.path = nil
+            return
+        }
+        // A soft tapered comet tail along the path it just flew.
+        let head = engine.size * 0.42
+        var left: [CGPoint] = [], right: [CGPoint] = []
+        for i in 0..<samples.count {
+            let p = samples[i].point
+            let prev = samples[max(0, i - 1)].point, next = samples[min(samples.count - 1, i + 1)].point
+            var n = CGPoint(x: -(next.y - prev.y), y: next.x - prev.x)
+            let length = max(hypot(n.x, n.y), 0.001)
+            n = CGPoint(x: n.x / length, y: n.y / length)
+            let w = head * pow(CGFloat(i) / CGFloat(samples.count - 1), 1.3) / 2
+            left.append(layerPoint(CGPoint(x: p.x + n.x * w, y: p.y + n.y * w)))
+            right.append(layerPoint(CGPoint(x: p.x - n.x * w, y: p.y - n.y * w)))
+        }
+        let path = CGMutablePath()
+        path.addLines(between: left + right.reversed())
+        path.closeSubpath()
+        trailLayer.path = path
+        trailLayer.opacity = Float(min(1, (speed - 260) / 900) * 0.26 * engine.opacity)
+
+        if speed > 900, now - lastTwinkle > 0.05 {
+            lastTwinkle = now
+            let jitter = CGPoint(x: .random(in: -10...10), y: .random(in: -10...10))
+            twinkle(at: CGPoint(x: center.x + jitter.x, y: center.y + jitter.y))
+        }
+    }
+
+    private func renderString(now: Double, dt: Double, visible: Bool) {
+        guard visible, Settings.shared.trail == .string, engine.opacity > 0.02 else {
+            stringLayer.path = nil
+            stringMid = nil
+            return
+        }
+        // Like a balloon string held by the phone: it trails behind with a little slack and sway.
+        let from = CGPoint(x: bounds.width * Settings.shared.phonePosition, y: bounds.height + 4)
+        let to = engine.bodyCenter
+        let distance = hypot(to.x - from.x, to.y - from.y)
+        let slack = max(0, 160 - distance * 0.12)
+        let goal = CGPoint(x: (from.x + to.x) / 2 + CGFloat(sin(now * 1.3)) * 6, y: (from.y + to.y) / 2 + slack)
+        var mid = stringMid ?? goal
+        let k: CGFloat = 22, t = CGFloat(dt)
+        stringMidVelocity.dx += (k * (goal.x - mid.x) - 2 * sqrt(k) * 0.55 * stringMidVelocity.dx) * t
+        stringMidVelocity.dy += (k * (goal.y - mid.y) - 2 * sqrt(k) * 0.55 * stringMidVelocity.dy) * t
+        mid.x += stringMidVelocity.dx * t
+        mid.y += stringMidVelocity.dy * t
+        stringMid = mid
+        let control = CGPoint(x: 2 * mid.x - (from.x + to.x) / 2, y: 2 * mid.y - (from.y + to.y) / 2)
+        let path = CGMutablePath()
+        path.move(to: layerPoint(from))
+        path.addQuadCurve(to: layerPoint(to), control: layerPoint(control))
+        stringLayer.path = path
+        stringLayer.opacity = Float(engine.opacity)
+    }
+
+    // MARK: Effects (fire and forget)
+
+    private func addTransient(_ layer: CALayer, life: Double) {
+        layer.contentsScale = scale
+        effects.addSublayer(layer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + life) { layer.removeFromSuperlayer() }
+    }
+
+    private func ring(at point: CGPoint, radius: CGFloat, color: UInt32, alpha: CGFloat, duration: Double) {
+        let ring = CAShapeLayer()
+        ring.path = CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2), transform: nil)
+        ring.fillColor = nil
+        ring.strokeColor = NSColor(hex: color, alpha: alpha).cgColor
+        ring.lineWidth = 3.5
+        ring.position = layerPoint(point)
+        ring.opacity = 0
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 0.3
+        grow.toValue = 1
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        let group = CAAnimationGroup()
+        group.animations = [grow, fade]
+        group.duration = duration
+        group.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.7, 0.3, 1)
+        ring.add(group, forKey: "ring")
+        addTransient(ring, life: duration + 0.05)
+    }
+
+    private func star(at point: CGPoint, radius: CGFloat, travel: CGVector, color: UInt32, duration: Double) {
+        let star = CAShapeLayer()
+        star.path = Teardrop.star(radius: radius)
+        star.fillColor = NSColor(hex: color).cgColor
+        star.position = layerPoint(point)
+        star.opacity = 0
+        let move = CABasicAnimation(keyPath: "position")
+        move.fromValue = NSValue(point: layerPoint(point))
+        move.toValue = NSValue(point: layerPoint(CGPoint(x: point.x + travel.dx, y: point.y + travel.dy)))
+        move.timingFunction = CAMediaTimingFunction(controlPoints: 0.1, 0.8, 0.3, 1)
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = [1, 1, 0]
+        fade.keyTimes = [0, 0.45, 1]
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.toValue = CGFloat.random(in: -2.5...2.5)
+        let shrink = CABasicAnimation(keyPath: "transform.scale")
+        shrink.fromValue = 1
+        shrink.toValue = 0.4
+        let group = CAAnimationGroup()
+        group.animations = [move, fade, spin, shrink]
+        group.duration = duration
+        star.add(group, forKey: "star")
+        addTransient(star, life: duration + 0.05)
+    }
+
+    private func twinkle(at point: CGPoint) {
+        star(at: point, radius: .random(in: 3...5.5), travel: CGVector(dx: .random(in: -8...8), dy: .random(in: 6...18)),
+             color: [Palette.berry1, Palette.berry2].randomElement()!, duration: 0.5)
+    }
+
+    /// Landing on something it's pointing at: a soft ring and a tiny nod.
+    private func softLand(at point: CGPoint) {
+        engine.press(depth: 0.05)
+        ring(at: point, radius: 30, color: Palette.berry2, alpha: 0.55, duration: 0.7)
+    }
+
+    /// Popping out of (or diving back into) the phone at the bottom edge.
+    private func puff(at point: CGPoint) {
+        guard Settings.shared.showCursor else { return }
+        ring(at: point, radius: 26, color: Palette.berry1, alpha: 0.6, duration: 0.55)
+        for i in 0..<3 {
+            let dx = CGFloat(i - 1) * 14
+            star(at: CGPoint(x: point.x + dx, y: point.y - 4), radius: 4, travel: CGVector(dx: dx * 0.6, dy: -28),
+                 color: Palette.berry1, duration: 0.6)
+        }
+    }
+
+    /// A real click: a firm squish, a ring and a little burst of stars.
+    func clickEffect(at point: CGPoint, right: Bool = false) {
+        engine.press(depth: 0.14)
+        ring(at: point, radius: 38, color: right ? Palette.berry3 : Palette.berry2, alpha: 0.85, duration: 0.65)
+        for i in 0..<6 {
+            let a = CGFloat(i) / 6 * 2 * .pi + .random(in: -0.25...0.25)
+            let distance = CGFloat.random(in: 34...58)
+            star(at: point, radius: .random(in: 4...7), travel: CGVector(dx: cos(a) * distance, dy: sin(a) * distance),
+                 color: [Palette.berry1, Palette.berry2, Palette.berry3].randomElement()!, duration: 0.55)
+        }
+    }
+
+    /// A typed character floating up from the cursor, so you can see him typing.
+    func typedEffect(_ text: String) {
+        guard Settings.shared.showCursor, engine.opacity > 0.1 else { return }
+        engine.press(depth: 0.035)
+        for (i, ch) in text.enumerated() where !ch.isWhitespace {
+            let glyph = CATextLayer()
+            glyph.string = NSAttributedString(string: String(ch), attributes: [
+                .font: Fonts.display(22),
+                .foregroundColor: NSColor(hex: Palette.berry3),
+                .strokeColor: NSColor.white,
+                .strokeWidth: -3.5,
+            ])
+            glyph.alignmentMode = .center
+            glyph.bounds = CGRect(x: 0, y: 0, width: 28, height: 30)
+            let start = CGPoint(x: engine.tip.x + engine.size * 0.55 + CGFloat(i) * 6, y: engine.tip.y - 6)
+            glyph.position = layerPoint(start)
+            glyph.opacity = 0
+            let rise = CABasicAnimation(keyPath: "position")
+            rise.fromValue = NSValue(point: layerPoint(start))
+            rise.toValue = NSValue(point: layerPoint(CGPoint(x: start.x + .random(in: -12...16), y: start.y - 46)))
+            rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0, 1, 1, 0]
+            fade.keyTimes = [0, 0.12, 0.55, 1]
+            let shrink = CABasicAnimation(keyPath: "transform.scale")
+            shrink.fromValue = 1.1
+            shrink.toValue = 0.75
+            let group = CAAnimationGroup()
+            group.animations = [rise, fade, shrink]
+            group.duration = 0.9
+            glyph.add(group, forKey: "glyph")
+            addTransient(glyph, life: 0.95)
+        }
+    }
+
+    /// A little label that pops up next to the cursor, like "⌘T" or "Opening Safari".
+    func bubble(_ text: String, life: Double = 1.4) {
+        guard Settings.shared.showCursor else { return }
+        let label = CATextLayer()
+        let attributed = NSAttributedString(string: text, attributes: [
+            .font: Fonts.display(19),
+            .foregroundColor: NSColor.white,
+        ])
+        label.string = attributed
+        label.contentsScale = scale
+        label.alignmentMode = .center
+        let size = attributed.size()
+        let box = CALayer()
+        box.backgroundColor = NSColor(hex: Palette.ink, alpha: 0.92).cgColor
+        box.borderColor = NSColor(hex: Palette.berry2, alpha: 0.9).cgColor
+        box.borderWidth = 2
+        box.cornerRadius = 14
+        box.bounds = CGRect(x: 0, y: 0, width: ceil(size.width) + 28, height: ceil(size.height) + 14)
+        label.frame = box.bounds.insetBy(dx: 14, dy: 7)
+        box.addSublayer(label)
+        box.contentsScale = scale
+        box.opacity = 0
+        // The newest bubble replaces any older one.
+        for old in activeBubbles { old.layer.removeFromSuperlayer() }
+        activeBubbles = []
+        bubbles.addSublayer(box)
+        let pop = CASpringAnimation(keyPath: "transform.scale")
+        pop.fromValue = 0.4
+        pop.toValue = 1
+        pop.damping = 11
+        pop.initialVelocity = 6
+        pop.duration = pop.settlingDuration
+        box.add(pop, forKey: "pop")
+        activeBubbles.append((box, CACurrentMediaTime(), life))
+    }
+
+    private func renderBubbles(now: Double) {
+        guard !activeBubbles.isEmpty else { return }
+        let anchor: CGPoint
+        if engine.opacity > 0.1 {
+            anchor = CGPoint(x: engine.tip.x + engine.size * 1.05, y: engine.tip.y - engine.size * 0.1)
+        } else {
+            anchor = CGPoint(x: bounds.width * Settings.shared.phonePosition, y: bounds.height - engine.size * 1.3)
+        }
+        activeBubbles.removeAll { bubble in
+            let age = now - bubble.born
+            if age > bubble.life {
+                bubble.layer.removeFromSuperlayer()
+                return true
+            }
+            var point = anchor
+            let width = bubble.layer.bounds.width
+            if point.x + width > bounds.width - 12 { point.x = engine.tip.x - width - engine.size * 0.3 }
+            bubble.layer.position = layerPoint(CGPoint(x: point.x + width / 2, y: point.y - CGFloat(min(age, 0.3)) * 20))
+            let fadeIn = min(1, age / 0.12), fadeOut = min(1, (bubble.life - age) / 0.3)
+            bubble.layer.opacity = Float(min(fadeIn, fadeOut))
+            return false
+        }
+    }
+
+    // MARK: Caption
+
     private func layoutCaption() {
-        guard let caption, !caption.isEmpty else {
-            captionText = nil
-            captionRect = .null
+        guard let caption, !caption.isEmpty, bounds.width > 0 else {
+            captionBox.opacity = 0
             return
         }
         let style = NSMutableParagraphStyle()
@@ -316,240 +883,83 @@ final class CursorView: NSView {
             .paragraphStyle: style,
         ])
         let maxWidth = min(bounds.width - 80, 960)
-        let size = text.boundingRect(with: CGSize(width: maxWidth, height: 400),
-                                     options: [.usesLineFragmentOrigin, .usesFontLeading]).size
+        let size = text.boundingRect(with: CGSize(width: maxWidth, height: 400), options: [.usesLineFragmentOrigin, .usesFontLeading]).size
         let pad = CGSize(width: 28, height: 18)
         let box = CGSize(width: ceil(size.width) + pad.width * 2, height: ceil(size.height) + pad.height * 2)
-        let bottom = bounds.height - engine.size * 1.4 - 24
-        captionText = text
-        captionRect = CGRect(x: (bounds.width - box.width) / 2, y: bottom - box.height, width: box.width, height: box.height)
+        let bottom = bounds.height - engine.size * 1.4 - 24  // y down: just above the parked cursor
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        captionBox.frame = CGRect(x: (bounds.width - box.width) / 2, y: bounds.height - bottom, width: box.width, height: box.height)
+        captionText.frame = captionBox.bounds.insetBy(dx: pad.width, dy: pad.height)
+        captionText.string = text
+        CATransaction.commit()
+        captionBox.opacity = 1
+    }
+}
+
+/// A click-through, transparent window over the whole main screen that shows the cursor.
+final class CursorOverlay: NSObject {
+    let view = CursorView(frame: .zero)
+    private var window: NSWindow?
+    private var displayLink: CADisplayLink?
+    private var lastTime: CFTimeInterval = 0
+
+    /// Called every frame with the face the phone should show.
+    var onFace: ((FaceState) -> Void)?
+
+    var mode: CursorMode {
+        get { view.engine.mode }
+        set { view.engine.setMode(newValue) }
     }
 
-    override var isFlipped: Bool { true }
-    override var isOpaque: Bool { false }
+    /// Where the cursor rests when nobody is pointing: tucked away with eyes on your mouse, or parked above the phone.
+    var idleMode: CursorMode { Settings.shared.followMouse ? .following : .docked }
 
-    func step(dt: Double, now: Double, mouse: CGPoint) {
-        engine.step(dt: dt, now: now, mouse: mouse, bounds: bounds.size)
-        let dirty = contentRect(now: now)
-        setNeedsDisplay(dirty.union(lastDirty))
-        lastDirty = dirty
+    func goHome() { mode = idleMode }
+
+    func start() {
+        mode = idleMode
+        makeWindow()
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.makeWindow()
+        }
+        // Driven by the display itself, so every frame is evenly paced.
+        let link = view.displayLink(target: self, selector: #selector(tick(_:)))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
     }
 
-    /// Everything drawn this frame, padded for the glow.
-    private func contentRect(now: Double) -> CGRect {
-        let s = engine.size
-        var r = CGRect(x: engine.tip.x - s * 1.6, y: engine.tip.y - s * 1.6, width: s * 3.2, height: s * 3.2)
-        for dot in engine.trail { r = r.union(CGRect(x: dot.point.x - 20, y: dot.point.y - 20, width: 40, height: 40)) }
-        for ring in engine.rings { r = r.union(CGRect(x: ring.point.x - 90, y: ring.point.y - 90, width: 180, height: 180)) }
-        for sparkle in engine.sparkles { r = r.union(CGRect(x: sparkle.point.x - 16, y: sparkle.point.y - 16, width: 32, height: 32)) }
-        if let tether = tetherPoints() {
-            for p in [tether.from, tether.control, tether.to] { r = r.union(CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16)) }
-        }
-        return r.insetBy(dx: -40, dy: -40)
+    func talkTest(seconds: Double = 3) {
+        view.engine.talkUntil = CACurrentMediaTime() + seconds
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.clear(dirtyRect)
-        guard Settings.shared.showCursor else { return }
-        let now = CACurrentMediaTime()
-
-        // A dotted "remote control" line from the phone to the cursor while he's driving it.
-        if let tether = tetherPoints() {
-            let path = CGMutablePath()
-            path.move(to: tether.from)
-            path.addQuadCurve(to: tether.to, control: tether.control)
-            ctx.saveGState()
-            ctx.addPath(path)
-            ctx.setLineCap(.round)
-            ctx.setLineWidth(5)
-            ctx.setLineDash(phase: CGFloat(-now * 60), lengths: [0.1, 16])
-            ctx.setStrokeColor(NSColor(hex: Palette.berry1, alpha: 0.55 * engine.opacity).cgColor)
-            ctx.strokePath()
-            ctx.restoreGState()
+    private func makeWindow() {
+        guard let screen = NSScreen.screens.first else { return }
+        if let window {
+            window.setFrame(screen.frame, display: true)
+            return
         }
-
-        for sparkle in engine.sparkles {
-            let p = CGFloat((now - sparkle.born) / 0.7)
-            drawStar(ctx, at: sparkle.point, size: sparkle.size * (1 - p * 0.6), angle: sparkle.spin * CGFloat(now - sparkle.born),
-                     color: NSColor(hex: p < 0.4 ? Palette.berry1 : Palette.berry2, alpha: 1 - p))
-        }
-
-        // A dotted "remote control" line from the phone to the cursor while he's driving it.
-        if let tether = tetherPoints() {
-            let path = CGMutablePath()
-            path.move(to: tether.from)
-            path.addQuadCurve(to: tether.to, control: tether.control)
-            ctx.saveGState()
-            ctx.addPath(path)
-            ctx.setLineCap(.round)
-            ctx.setLineWidth(5)
-            ctx.setLineDash(phase: CGFloat(-now * 60), lengths: [0.1, 16])
-            ctx.setStrokeColor(NSColor(hex: Palette.berry1, alpha: 0.55 * engine.opacity).cgColor)
-            ctx.strokePath()
-            ctx.restoreGState()
-        }
-
-        for sparkle in engine.sparkles {
-            let p = CGFloat((now - sparkle.born) / 0.7)
-            drawStar(ctx, at: sparkle.point, size: sparkle.size * (1 - p * 0.6), angle: sparkle.spin * CGFloat(now - sparkle.born),
-                     color: NSColor(hex: p < 0.4 ? Palette.berry1 : Palette.berry2, alpha: 1 - p))
-        }
-
-        for ring in engine.rings {
-            let p = CGFloat((now - ring.born) / 0.9)
-            let radius = 16 + 64 * (1 - pow(1 - p, 3))
-            ctx.setStrokeColor(NSColor(hex: Palette.berry2, alpha: 0.75 * (1 - p)).cgColor)
-            ctx.setLineWidth(5)
-            ctx.strokeEllipse(in: CGRect(x: ring.point.x - radius, y: ring.point.y - radius, width: radius * 2, height: radius * 2))
-        }
-
-        for dot in engine.trail {
-            let p = CGFloat((now - dot.born) / 0.45)
-            let s = dot.size * (1 - p * 0.5)
-            ctx.setFillColor(NSColor(hex: dot.color, alpha: 0.7 * (1 - p)).cgColor)
-            ctx.fillEllipse(in: CGRect(x: dot.point.x - s / 2, y: dot.point.y - s / 2, width: s, height: s))
-        }
-
-        if let captionText, captionRect.intersects(dirtyRect) {
-            let panel = NSBezierPath(roundedRect: captionRect, xRadius: 22, yRadius: 22)
-            NSColor(hex: Palette.ink, alpha: 0.86).setFill()
-            panel.fill()
-            captionText.draw(with: captionRect.insetBy(dx: 28, dy: 18), options: [.usesLineFragmentOrigin, .usesFontLeading])
-        }
-
-        drawCursor(ctx, now: now)
+        let window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .screenSaver
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        window.contentView = view
+        window.orderFrontRegardless()
+        self.window = window
     }
 
-    /// The blob teardrop from the design: tip in the top-left corner, eyes looking at the tip.
-    private func drawCursor(_ ctx: CGContext, now: Double) {
-        let s = engine.size
-        let k = s / 96  // the design draws it in a 96 pt box
-        ctx.saveGState()
-        // Hover gently while pointing, squish like a click when it lands, stretch along its flight.
-        var bob: CGFloat = 0
-        if case .pinned = engine.mode, now - engine.landedAt > 0.4 { bob = CGFloat(sin(now * 3.2)) * 2.5 }
-        ctx.translateBy(x: engine.tip.x, y: engine.tip.y + bob)
-        let since = now - engine.landedAt
-        if since < 0.45 {
-            let press = CGFloat(sin(since / 0.45 * .pi * 2) * exp(-since * 6)) * 0.1
-            ctx.scaleBy(x: 1 + press, y: 1 - press)
-        }
-        let v = engine.velocity
-        let speed = hypot(v.dx, v.dy)
-        if speed > 60 {
-            let dir = atan2(v.dy, v.dx)
-            let amount = min(0.14, speed / 9000)
-            ctx.rotate(by: dir)
-            ctx.scaleBy(x: 1 + amount, y: 1 - amount * 0.6)
-            ctx.rotate(by: -dir)
-        }
-        ctx.rotate(by: engine.angle)
-
-        guard engine.opacity > 0.01 else { ctx.restoreGState(); return }
-        ctx.setAlpha(engine.opacity)
-        let path = teardrop(size: s, tipRadius: 6 * k)
-
-        // Shadow or glow under the body.
-        ctx.saveGState()
-        if Settings.shared.glow {
-            ctx.setShadow(offset: .zero, blur: 40 * k, color: NSColor(hex: Palette.berry2, alpha: 0.6).cgColor)
-        } else {
-            ctx.setShadow(offset: CGSize(width: 0, height: -14 * k), blur: 30 * k, color: NSColor(hex: Palette.berry3, alpha: 0.6).cgColor)
-        }
-        ctx.addPath(path)
-        ctx.setFillColor(NSColor.white.cgColor)
-        ctx.fillPath()
-        ctx.restoreGState()
-
-        // Gradient body.
-        ctx.saveGState()
-        ctx.addPath(path)
-        ctx.clip()
-        let space = CGColorSpace(name: CGColorSpace.sRGB)!
-        let colors = Palette.gradient.map { NSColor(hex: $0).cgColor } as CFArray
-        let stops = Palette.gradientStops.map { CGFloat($0) }
-        if let gradient = CGGradient(colorsSpace: space, colors: colors, locations: stops) {
-            ctx.drawLinearGradient(gradient, start: CGPoint(x: 0.25 * s, y: 0.067 * s),
-                                   end: CGPoint(x: 0.75 * s, y: 0.933 * s), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-        }
-        let shine = [NSColor(white: 1, alpha: 0.5).cgColor, NSColor(white: 1, alpha: 0).cgColor] as CFArray
-        if let gradient = CGGradient(colorsSpace: space, colors: shine, locations: [0, 1]) {
-            let c = CGPoint(x: 0.3 * s, y: 0.22 * s)
-            ctx.drawRadialGradient(gradient, startCenter: c, startRadius: 0, endCenter: c, endRadius: 0.36 * s, options: [])
-        }
-        // White rim (half the stroke is clipped away, leaving 4 pt inside).
-        ctx.addPath(path)
-        ctx.setStrokeColor(NSColor.white.cgColor)
-        ctx.setLineWidth(8 * k)
-        ctx.strokePath()
-        ctx.restoreGState()
-
-        // Two little eyes, pupils toward the tip. They blink now and then.
-        let blinking = now < engine.blinkUntil
-        // Pupils look toward the tip at rest, and ahead in the direction of flight while moving.
-        var look = CGPoint(x: -1, y: -1)
-        if speed > 120 {
-            let local = CGPoint(x: v.dx * cos(-engine.angle) - v.dy * sin(-engine.angle),
-                                y: v.dx * sin(-engine.angle) + v.dy * cos(-engine.angle))
-            let n = max(hypot(local.x, local.y), 1)
-            look = CGPoint(x: local.x / n * 1.4, y: local.y / n * 1.4)
-        }
-        let eye = 18 * k
-        let pupil = 9 * k
-        for i in 0..<2 {
-            let x = (38 + CGFloat(i) * 24) * k
-            let y = 42 * k
-            let white = CGRect(x: x, y: y, width: eye, height: eye)
-            ctx.setFillColor(NSColor.white.cgColor)
-            if blinking {
-                ctx.fill(CGRect(x: x, y: y + eye / 2 - 1.5 * k, width: eye, height: 3 * k))
-            } else {
-                ctx.fillEllipse(in: white)
-                ctx.setFillColor(NSColor(hex: Palette.ink).cgColor)
-                let px = x + (eye - pupil) / 2 + look.x * 3.2 * k
-                let py = y + (eye - pupil) / 2 + look.y * 3.2 * k
-                ctx.fillEllipse(in: CGRect(x: px, y: py, width: pupil, height: pupil))
-            }
-        }
-        ctx.restoreGState()
-    }
-
-    /// From the phone's spot at the bottom of the screen to the cursor, bowed a little like a string.
-    private func tetherPoints() -> (from: CGPoint, control: CGPoint, to: CGPoint)? {
-        guard case .pinned = engine.mode, engine.opacity > 0.05 else { return nil }
-        let from = CGPoint(x: bounds.width * Settings.shared.phonePosition, y: bounds.height + 4)
-        let to = engine.bodyCenter
-        let mid = CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2)
-        let sag = CGFloat(sin(CACurrentMediaTime() * 1.7)) * 18
-        let control = CGPoint(x: mid.x + (to.y - from.y) * 0.18 + sag, y: mid.y - (to.x - from.x) * 0.08)
-        return (from, control, to)
-    }
-
-    private func drawStar(_ ctx: CGContext, at p: CGPoint, size: CGFloat, angle: CGFloat, color: NSColor) {
-        let path = CGMutablePath()
-        for i in 0..<8 {
-            let r = i % 2 == 0 ? size : size * 0.38
-            let a = angle + CGFloat(i) * .pi / 4
-            let pt = CGPoint(x: p.x + cos(a) * r, y: p.y + sin(a) * r)
-            i == 0 ? path.move(to: pt) : path.addLine(to: pt)
-        }
-        path.closeSubpath()
-        ctx.addPath(path)
-        ctx.setFillColor(color.cgColor)
-        ctx.fillPath()
-    }
-
-    /// A square with three fully rounded corners and one sharp one at the origin.
-    private func teardrop(size s: CGFloat, tipRadius r: CGFloat) -> CGPath {
-        let path = CGMutablePath()
-        let big = s / 2
-        path.move(to: CGPoint(x: r, y: 0))
-        path.addArc(tangent1End: CGPoint(x: s, y: 0), tangent2End: CGPoint(x: s, y: s), radius: big)
-        path.addArc(tangent1End: CGPoint(x: s, y: s), tangent2End: CGPoint(x: 0, y: s), radius: big)
-        path.addArc(tangent1End: CGPoint(x: 0, y: s), tangent2End: CGPoint(x: 0, y: 0), radius: big)
-        path.addArc(tangent1End: CGPoint(x: 0, y: 0), tangent2End: CGPoint(x: s, y: 0), radius: r)
-        path.closeSubpath()
-        return path
+    @objc private func tick(_ link: CADisplayLink) {
+        guard let window else { return }
+        let now = link.targetTimestamp
+        let dt = lastTime == 0 ? 1.0 / 60 : min(max(now - lastTime, 1.0 / 480), 1.0 / 20)
+        lastTime = now
+        let m = NSEvent.mouseLocation
+        let f = window.frame
+        view.step(dt: dt, now: now, mouse: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
+        onFace?(view.engine.face(in: view.bounds.size, now: now))
     }
 }

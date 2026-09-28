@@ -64,6 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func dock() { overlay.goHome() }
     @objc private func toggleShow() { settings.showCursor.toggle(); overlay.view.needsDisplay = true }
     @objc private func toggleGlow() { settings.glow.toggle() }
+    @objc private func setTrail(_ item: NSMenuItem) {
+        if let raw = item.representedObject as? String, let trail = PointerTrail(rawValue: raw) { settings.trail = trail }
+    }
     @objc private func talkTest() { overlay.talkTest() }
 
     @objc private func setSize(_ item: NSMenuItem) { settings.cursorSize = Double(item.tag) }
@@ -202,6 +205,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         captions.state = settings.captions ? .on : .off
         menu.addItem(captions)
         menu.addItem(.separator())
+
+        let trailMenu = NSMenu()
+        for trail in PointerTrail.allCases {
+            let t = item(trail.title, #selector(setTrail(_:)))
+            t.representedObject = trail.rawValue
+            t.state = settings.trail == trail ? .on : .off
+            trailMenu.addItem(t)
+        }
+        menu.addItem(submenu("Pointer Trail", trailMenu))
 
         let glow = item("Cursor Glow", #selector(toggleGlow))
         glow.state = settings.glow ? .on : .off
