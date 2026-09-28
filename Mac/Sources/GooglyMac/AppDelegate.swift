@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import GooglyShared
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = Settings.shared
     private let overlay = CursorOverlay()
