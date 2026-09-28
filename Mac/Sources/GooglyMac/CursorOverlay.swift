@@ -111,6 +111,13 @@ final class CursorEngine {
     private var lastDot = 0.0
     private var ringPending = false
 
+    // A planned flight: an eased arc from where it was to where it's going.
+    private var flightFrom = CGPoint.zero
+    private var flightControl = CGPoint.zero
+    private var flightTo = CGPoint(x: -9999, y: -9999)
+    private var flightStart = 0.0
+    private var flightDuration = 1.0
+
     var talkUntil = 0.0
     /// Set by the conductor while listening, thinking or talking.
     var brainMood: Mood?
@@ -155,14 +162,8 @@ final class CursorEngine {
             placed = true
         }
 
-        // A slightly bouncy spring: quick, with a small overshoot when it lands.
-        let k: CGFloat = 150
-        let damping: CGFloat = 2 * sqrt(k) * 0.72
         let t = CGFloat(dt)
-        velocity.dx += (k * (target.x - tip.x) - damping * velocity.dx) * t
-        velocity.dy += (k * (target.y - tip.y) - damping * velocity.dy) * t
-        tip.x += velocity.dx * t
-        tip.y += velocity.dy * t
+        fly(toward: target, now: now)
 
         // Visible whenever it's pointing or parked; in follow mode it fades out once it's home.
         let nearHome = hypot(tip.x - target.x, tip.y - target.y) < 12
@@ -175,13 +176,13 @@ final class CursorEngine {
         let home: Bool
         switch mode { case .docked, .following: home = true; case .pinned: home = false }
         let targetAngle = home ? .pi / 4 : atan2(-away.dy, -away.dx) - .pi / 4
-        let ka: CGFloat = 120
-        angleVelocity += (ka * (targetAngle - angle) - 2 * sqrt(ka) * 0.9 * angleVelocity) * t
+        let ka: CGFloat = 45
+        angleVelocity += (ka * (targetAngle - angle) - 2 * sqrt(ka) * 1.0 * angleVelocity) * t
         angle += angleVelocity * t
 
         // Bubble trail while flying fast.
         let speed = hypot(velocity.dx, velocity.dy)
-        if speed > 700, now - lastDot > 0.035 {
+        if speed > 1100, now - lastDot > 0.05 {
             lastDot = now
             let colors = [Palette.berry1, Palette.berry2, Palette.berry3]
             trail.append(Dot(point: bodyCenter, born: now, size: size * CGFloat.random(in: 0.12...0.2),
@@ -190,7 +191,7 @@ final class CursorEngine {
         trail.removeAll { now - $0.born > 0.45 }
 
         // A soft ring when it lands on a pinned spot.
-        if ringPending, speed < 60, hypot(target.x - tip.x, target.y - tip.y) < 4 {
+        if ringPending, flightProgress(now) >= 1 {
             ringPending = false
             rings.append(Ring(point: tip, born: now))
             landedAt = now
@@ -215,6 +216,42 @@ final class CursorEngine {
             blinkUntil = now + 0.12
             nextBlink = now + Double.random(in: 2.5...6)
         }
+    }
+
+    private func flightProgress(_ now: Double) -> Double {
+        min(1, max(0, (now - flightStart) / flightDuration))
+    }
+
+    /// Glides along a gentle arc with smooth acceleration and a soft landing (no springy wobble).
+    private func fly(toward target: CGPoint, now: Double) {
+        if hypot(target.x - flightTo.x, target.y - flightTo.y) > 1 {
+            let distance = hypot(target.x - tip.x, target.y - tip.y)
+            flightFrom = tip
+            flightTo = target
+            flightStart = now
+            // Longer trips take a little longer, but never feel sluggish.
+            flightDuration = min(1.15, max(0.45, 0.42 + Double(distance) / 2300))
+            // Bow the path upward like a lob, and carry on in the direction it was already moving.
+            let mid = CGPoint(x: (tip.x + target.x) / 2, y: (tip.y + target.y) / 2)
+            let dx = target.x - tip.x, dy = target.y - tip.y
+            var normal = CGPoint(x: -dy, y: dx)
+            if normal.y > 0 { normal = CGPoint(x: -normal.x, y: -normal.y) }  // always bow upward
+            let len = max(hypot(normal.x, normal.y), 1)
+            let bow = min(distance * 0.16, 140)
+            let carry = CGFloat(flightDuration) * 0.22
+            flightControl = CGPoint(x: mid.x + normal.x / len * bow + velocity.dx * carry,
+                                    y: mid.y + normal.y / len * bow + velocity.dy * carry)
+        }
+        let p = flightProgress(now)
+        // Smootherstep: zero speed and zero acceleration at both ends.
+        let e = CGFloat(p * p * p * (p * (p * 6 - 15) + 10))
+        let de = CGFloat(30 * p * p * (p - 1) * (p - 1) / flightDuration)
+        let u = 1 - e
+        let a = flightFrom, c = flightControl, b = flightTo
+        tip = CGPoint(x: u * u * a.x + 2 * u * e * c.x + e * e * b.x,
+                      y: u * u * a.y + 2 * u * e * c.y + e * e * b.y)
+        let d = CGPoint(x: 2 * u * (c.x - a.x) + 2 * e * (b.x - c.x), y: 2 * u * (c.y - a.y) + 2 * e * (b.y - c.y))
+        velocity = CGVector(dx: d.x * de, dy: d.y * de)
     }
 
     var bodyCenter: CGPoint {
@@ -395,14 +432,14 @@ final class CursorView: NSView {
         ctx.translateBy(x: engine.tip.x, y: engine.tip.y + bob)
         let since = now - engine.landedAt
         if since < 0.45 {
-            let press = CGFloat(sin(since / 0.45 * .pi * 2) * exp(-since * 5)) * 0.16
+            let press = CGFloat(sin(since / 0.45 * .pi * 2) * exp(-since * 6)) * 0.1
             ctx.scaleBy(x: 1 + press, y: 1 - press)
         }
         let v = engine.velocity
         let speed = hypot(v.dx, v.dy)
         if speed > 60 {
             let dir = atan2(v.dy, v.dx)
-            let amount = min(0.28, speed / 5000)
+            let amount = min(0.14, speed / 9000)
             ctx.rotate(by: dir)
             ctx.scaleBy(x: 1 + amount, y: 1 - amount * 0.6)
             ctx.rotate(by: -dir)

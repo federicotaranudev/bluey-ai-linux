@@ -8,6 +8,7 @@ final class PhoneServer {
     private var phones: [ObjectIdentifier: (link: LineConnection, name: String?)] = [:]
     private var pending: [ObjectIdentifier: LineConnection] = [:]
     private var lastSent: FaceState?
+    private var lastSentAt = Date.distantPast
     private var restartWork: DispatchWorkItem?
 
     /// Called with the names of connected phones whenever that list changes.
@@ -86,7 +87,9 @@ final class PhoneServer {
 
     /// Sends the face to every phone, skipping updates too small to see.
     func send(_ face: FaceState) {
-        if let last = lastSent,
+        // Resend at least once a second even when nothing changed, so the phone knows the Mac is still driving.
+        let now = Date()
+        if let last = lastSent, now.timeIntervalSince(lastSentAt) < 1,
            last.mood == face.mood,
            abs(last.gazeX - face.gazeX) < 0.004,
            abs(last.gazeY - face.gazeY) < 0.004,
@@ -94,6 +97,7 @@ final class PhoneServer {
             return
         }
         lastSent = face
+        lastSentAt = now
         for phone in phones.values { phone.link.send(Packet(face: face)) }
     }
 }

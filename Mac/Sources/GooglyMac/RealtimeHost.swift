@@ -38,6 +38,10 @@ final class RealtimeHost {
             setAwake(false)
         case "caption":
             if Settings.shared.captions { showCaption(packet.text, for: packet.text == nil ? 0 : 30) }
+        case "speaking":
+            setSpeaking(true)
+        case "quiet":
+            setSpeaking(false)
         case "captionDone":
             scheduleCaptionClear(after: 2.5)
         case "tool":
@@ -56,6 +60,8 @@ final class RealtimeHost {
         engine.brainMood = nil
         engine.gazeOverride = on ? CGPoint(x: 0, y: 0.15) : nil  // looks at you while awake
         if !on {
+            queue = []
+            stopChoreography()
             overlay.goHome()
             showCaption(nil, for: 0)
         }
@@ -127,16 +133,15 @@ final class RealtimeHost {
             guard let snapshot else { return ("Call look_at_screen first.", nil) }
             guard let target = snapshot.target(id) else { return ("No target \(id). Use an id from the last look_at_screen.", nil) }
             point(to: CGPoint(x: target.rect.midX, y: target.rect.maxY + 3))
-            return ("Pointing at \"\(target.text)\".", nil)
+            return (queue.count > 1 ? "Queued: your cursor will point at \"\(target.text)\" after the earlier spots." : "Pointing at \"\(target.text)\".", nil)
         case "point_at_spot":
             guard let x = args["x"] as? Double, let y = args["y"] as? Double else { return ("Give x and y.", nil) }
             let size = snapshot?.size ?? NSScreen.screens.first?.frame.size ?? CGSize(width: 1440, height: 900)
             point(to: CGPoint(x: x / 1000 * size.width, y: y / 1000 * size.height))
             return ("Pointing there.", nil)
         case "stop_pointing":
-            overlay.goHome()
-            engine.gazeOverride = awake ? CGPoint(x: 0, y: 0.15) : nil
-            return ("Cursor is home.", nil)
+            requestHome()
+            return ("Your cursor will head home once you finish talking.", nil)
         case "go_to_sleep":
             // The phone closes the session after this call; the Mac just tidies up.
             return ("Going to sleep. Say a very short goodbye.", nil)
@@ -145,9 +150,79 @@ final class RealtimeHost {
         }
     }
 
+    // MARK: Pointing choreography
+    //
+    // He often asks to point at several things at once. Each spot gets its own flight and a hold long
+    // enough to talk about it, and the cursor only goes home once he's finished talking.
+
+    private var queue: [CGPoint] = []
+    private var holdUntil = 0.0
+    private var homeRequested = false
+    private var speaking = false
+    private var quietSince = 0.0
+    private var timer: Timer?
+
+    /// How long a spot stays pointed at before the next one (after the flight lands).
+    private static let minimumHold = 2.2
+    /// Pointing with nothing more to say: go home after this much quiet.
+    private static let idleHome = 5.0
+
     private func point(to spot: CGPoint) {
-        engine.gazeOverride = nil  // eyes follow the cursor while pointing
-        overlay.mode = .pinned(spot)
+        queue.append(spot)
+        homeRequested = false
+        startChoreography()
+    }
+
+    private func requestHome() {
+        homeRequested = true
+        startChoreography()
+    }
+
+    private func startChoreography() {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.choreograph() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+        choreograph()
+    }
+
+    private func choreograph() {
+        let now = CACurrentMediaTime()
+        if now >= holdUntil, !queue.isEmpty {
+            let spot = queue.removeFirst()
+            if !speaking { quietSince = now }  // give him time to start talking about it
+            engine.gazeOverride = nil  // his eyes follow the cursor while pointing
+            overlay.mode = .pinned(spot)
+            // Flight time plus a comfortable hold; a lone point just holds while he talks.
+            holdUntil = now + 1.0 + Self.minimumHold
+            return
+        }
+        guard queue.isEmpty, now >= holdUntil else { return }
+        let pointing: Bool
+        if case .pinned = overlay.mode { pointing = true } else { pointing = false }
+        guard pointing else { stopChoreography(); return }
+        // Go home once he's done talking: soon after he says so, or after a longer quiet spell.
+        let quietFor = speaking ? 0 : now - quietSince
+        if (homeRequested && quietFor > 1.2) || quietFor > Self.idleHome {
+            goHome()
+        }
+    }
+
+    private func goHome() {
+        overlay.goHome()
+        engine.gazeOverride = awake ? CGPoint(x: 0, y: 0.15) : nil
+        homeRequested = false
+        stopChoreography()
+    }
+
+    private func stopChoreography() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func setSpeaking(_ on: Bool) {
+        if speaking && !on { quietSince = CACurrentMediaTime() }
+        speaking = on
     }
 
     // MARK: Captions
@@ -179,10 +254,10 @@ final class RealtimeHost {
 
     /// Who he is. Editable from the menu bar (Personality…).
     static let defaultPersonality = """
-    You are a small, cute blueberry character with big googly eyes. You live on an iPhone that sits just under the \
-    user's computer screen, and you have your own big cursor you can fly around their screen to point at things. \
-    The user is often filming a video, so talk like a warm, playful co-host: short natural spoken sentences, usually \
-    one to three.
+    You are a small blueberry with big googly eyes who lives on an iPhone just under the user's screen, with your own \
+    big cursor for pointing at things on it. You speak concisely: usually one or two short sentences. You're funny \
+    and witty, with quick dry jokes and the odd blueberry pun, but the joke never gets in the way. Your real job is \
+    making things click: explain simply, like you're talking to a smart friend, one idea at a time, no jargon.
     """
 
     static var personality: String {
@@ -197,8 +272,9 @@ final class RealtimeHost {
     static let toolGuide = """
     Never use lists or markdown, and never read out ids or coordinates.
 
-    Whenever the user asks about anything on their screen, call look_at_screen first. Then, as you explain, call \
-    point_at right before you mention each thing so your cursor lands on it as you talk about it. Point at the most \
+    Whenever the user asks about anything on their screen, call look_at_screen first. Then explain one thing at a \
+    time: call point_at for a thing, talk about it, and only then call point_at for the next thing. Don't point at \
+    several things in one go; your cursor needs a moment to fly there and settle while you talk. Point at the most \
     specific thing (one word or number rather than a whole line). For shapes, arrows or charts with no text, use \
     point_at_spot. Walking through several things is great: point, talk, point at the next one, talk. If the screen \
     might have changed since your last look, look again. Call stop_pointing when you're done explaining. When the \

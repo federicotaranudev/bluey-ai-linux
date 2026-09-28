@@ -90,8 +90,10 @@ struct RootView: View {
             case .listening:
                 animator.localMood = nil
                 link.send(Packet(command: "awake"))
+                link.send(Packet(command: "quiet"))
             case .speaking:
                 animator.localMood = .talking
+                link.send(Packet(command: "speaking"))
             }
         }
         link.onCommand = { [live] command in
