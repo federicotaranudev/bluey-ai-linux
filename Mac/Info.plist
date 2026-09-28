@@ -22,6 +22,10 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Googly Eyes talks to the character on your iPhone over your local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hold ⌥Space and talk to ask Googly a question.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Googly turns what you say into text so it can answer you.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_googly._tcp</string>

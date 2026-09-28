@@ -7,27 +7,52 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0E02B38E4A5A909A93BA31C5 /* OFL-IBMPlex.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1249C703A2D40793CA70D00E /* OFL-IBMPlex.txt */; };
+		0F5614BE9A55A8498E40F5F1 /* IBMPlexMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1C8AB3F441CA03CDA07FAE72 /* IBMPlexMono-Medium.ttf */; };
 		162BD56C1F6191020071D2A2 /* BlobShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35F3C44C342D6E869E6E3B4E /* BlobShape.swift */; };
 		68F797C6A1D3EC7A83674C2A /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A762C0174AFF849BAD1A700 /* PairingView.swift */; };
+		6C5FF10BDE711139D00DB85A /* Fredoka.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D0EEE8F996B2F95804C1ECF8 /* Fredoka.ttf */; };
 		6E03A7EBF9AAFFE4AC87ADE4 /* GooglyLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F71F206238433A6F710528B /* GooglyLink.swift */; };
 		6F0C91F5B7E911464464DB96 /* Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A31DC33ABF7869BDE4E0F6C /* Palette.swift */; };
+		772A196648CCCC476A2E36F7 /* OFL-Fredoka.txt in Resources */ = {isa = PBXBuildFile; fileRef = 020C853B32D37028CE040148 /* OFL-Fredoka.txt */; };
+		9C57F9AFA362287C2B93142E /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0EAD8A3C72D3899AD5CD2AA8 /* IBMPlexMono-Regular.ttf */; };
 		C763037B3F88C28F89EB61F0 /* MacLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = B44C98F6A89143BA9C926480 /* MacLink.swift */; };
 		CD8A48CB04D56A4BEF47D6AB /* GooglyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C95CBBB828E99EC09708E98E /* GooglyApp.swift */; };
 		EADE24E60818A63E82366B42 /* FaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3AAA80221D679C8EAAE925 /* FaceView.swift */; };
+		FC47A19572BFD9F2386A85D3 /* IBMPlexSans.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AB333D12D3F4C506B3E49505 /* IBMPlexSans.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		020C853B32D37028CE040148 /* OFL-Fredoka.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OFL-Fredoka.txt"; sourceTree = "<group>"; };
+		0EAD8A3C72D3899AD5CD2AA8 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
+		1249C703A2D40793CA70D00E /* OFL-IBMPlex.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OFL-IBMPlex.txt"; sourceTree = "<group>"; };
+		1C8AB3F441CA03CDA07FAE72 /* IBMPlexMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Medium.ttf"; sourceTree = "<group>"; };
 		35F3C44C342D6E869E6E3B4E /* BlobShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlobShape.swift; sourceTree = "<group>"; };
 		4A31DC33ABF7869BDE4E0F6C /* Palette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Palette.swift; sourceTree = "<group>"; };
 		4F71F206238433A6F710528B /* GooglyLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooglyLink.swift; sourceTree = "<group>"; };
 		7A762C0174AFF849BAD1A700 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		AA3AAA80221D679C8EAAE925 /* FaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaceView.swift; sourceTree = "<group>"; };
+		AB333D12D3F4C506B3E49505 /* IBMPlexSans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = IBMPlexSans.ttf; sourceTree = "<group>"; };
 		B44C98F6A89143BA9C926480 /* MacLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacLink.swift; sourceTree = "<group>"; };
 		C95CBBB828E99EC09708E98E /* GooglyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GooglyApp.swift; sourceTree = "<group>"; };
+		D0EEE8F996B2F95804C1ECF8 /* Fredoka.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fredoka.ttf; sourceTree = "<group>"; };
 		E884B5117C895A0439FDFE12 /* GooglyEyes.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GooglyEyes.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		2F574059BA9C302B222352AA /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				D0EEE8F996B2F95804C1ECF8 /* Fredoka.ttf */,
+				1C8AB3F441CA03CDA07FAE72 /* IBMPlexMono-Medium.ttf */,
+				0EAD8A3C72D3899AD5CD2AA8 /* IBMPlexMono-Regular.ttf */,
+				AB333D12D3F4C506B3E49505 /* IBMPlexSans.ttf */,
+				020C853B32D37028CE040148 /* OFL-Fredoka.txt */,
+				1249C703A2D40793CA70D00E /* OFL-IBMPlex.txt */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 		4F61868F579B512B69F537A4 = {
 			isa = PBXGroup;
 			children = (
@@ -63,6 +88,7 @@
 			children = (
 				4F71F206238433A6F710528B /* GooglyLink.swift */,
 				4A31DC33ABF7869BDE4E0F6C /* Palette.swift */,
+				2F574059BA9C302B222352AA /* Fonts */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -75,6 +101,7 @@
 			buildConfigurationList = F407F923E98D1BD95427B3F2 /* Build configuration list for PBXNativeTarget "GooglyEyes" */;
 			buildPhases = (
 				6D0334CD98432B827CD4EE68 /* Sources */,
+				CA6B3F1718F83211F7C2367A /* Resources */,
 			);
 			buildRules = (
 			);
@@ -120,6 +147,22 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CA6B3F1718F83211F7C2367A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6C5FF10BDE711139D00DB85A /* Fredoka.ttf in Resources */,
+				0F5614BE9A55A8498E40F5F1 /* IBMPlexMono-Medium.ttf in Resources */,
+				9C57F9AFA362287C2B93142E /* IBMPlexMono-Regular.ttf in Resources */,
+				FC47A19572BFD9F2386A85D3 /* IBMPlexSans.ttf in Resources */,
+				772A196648CCCC476A2E36F7 /* OFL-Fredoka.txt in Resources */,
+				0E02B38E4A5A909A93BA31C5 /* OFL-IBMPlex.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		6D0334CD98432B827CD4EE68 /* Sources */ = {

@@ -30,6 +30,11 @@ final class Settings {
         set { defaults.set(newValue, forKey: "phonePosition"); onChange?() }
     }
 
+    var captions: Bool {
+        get { defaults.object(forKey: "captions") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "captions"); onChange?() }
+    }
+
     /// The mood picked by hand in the menu.
     var mood: Mood {
         get { Mood(rawValue: defaults.string(forKey: "mood") ?? "") ?? .listening }

@@ -99,6 +99,12 @@ final class CursorEngine {
     private var ringPending = false
 
     var talkUntil = 0.0
+    /// Set by the conductor while listening, thinking or talking.
+    var brainMood: Mood?
+    /// Where the phone's eyes should look instead of at the cursor (e.g. at you while listening).
+    var gazeOverride: CGPoint?
+    /// Live voice loudness, 0…1.
+    var talkLevel: () -> Double = { 0 }
     var blinkUntil = 0.0
     private var nextBlink = CACurrentMediaTime() + 3
 
@@ -180,19 +186,63 @@ final class CursorEngine {
     func face(in bounds: CGSize, now: Double) -> FaceState {
         let phone = phonePoint(in: bounds)
         let c = bodyCenter
-        let gx = max(-1, min(1, (c.x - phone.x) / (bounds.width * 0.5)))
-        let up = max(0.15, min(1, (phone.y - c.y) / (bounds.height * 1.1)))
-        let talking = now < talkUntil
-        let talk = talking ? 0.5 + 0.5 * sin(now * 19) * sin(now * 7.3) : 0
+        var gx = max(-1, min(1, (c.x - phone.x) / (bounds.width * 0.5)))
+        var gy = -max(0.15, min(1, (phone.y - c.y) / (bounds.height * 1.1)))
+        if let g = gazeOverride { gx = g.x; gy = g.y }
+
+        let testing = now < talkUntil
+        let talk = testing ? 0.5 + 0.5 * sin(now * 19) * sin(now * 7.3) : talkLevel()
         var mood = settings.mood
-        if talking { mood = .talking } else if case .pinned = mode, mood == .listening { mood = .pointing }
-        return FaceState(gazeX: gx, gazeY: -up, mood: mood, talk: talk)
+        if let brainMood {
+            mood = brainMood
+        } else if testing {
+            mood = .talking
+        } else if case .pinned = mode, mood == .listening {
+            mood = .pointing
+        }
+        return FaceState(gazeX: gx, gazeY: gy, mood: mood, talk: talk)
     }
 }
 
 final class CursorView: NSView {
     let engine = CursorEngine()
     private var lastDirty = CGRect.null
+    private var captionText: NSAttributedString?
+    private var captionRect = CGRect.null
+
+    /// Live caption shown near the bottom of the screen while he talks.
+    var caption: String? {
+        didSet {
+            guard caption != oldValue else { return }
+            setNeedsDisplay(captionRect.insetBy(dx: -4, dy: -4))
+            layoutCaption()
+            setNeedsDisplay(captionRect.insetBy(dx: -4, dy: -4))
+        }
+    }
+
+    private func layoutCaption() {
+        guard let caption, !caption.isEmpty else {
+            captionText = nil
+            captionRect = .null
+            return
+        }
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        style.lineSpacing = 4
+        let text = NSAttributedString(string: caption, attributes: [
+            .font: Fonts.display(30),
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: style,
+        ])
+        let maxWidth = min(bounds.width - 80, 960)
+        let size = text.boundingRect(with: CGSize(width: maxWidth, height: 400),
+                                     options: [.usesLineFragmentOrigin, .usesFontLeading]).size
+        let pad = CGSize(width: 28, height: 18)
+        let box = CGSize(width: ceil(size.width) + pad.width * 2, height: ceil(size.height) + pad.height * 2)
+        let bottom = bounds.height - engine.size * 1.4 - 24
+        captionText = text
+        captionRect = CGRect(x: (bounds.width - box.width) / 2, y: bottom - box.height, width: box.width, height: box.height)
+    }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -232,6 +282,13 @@ final class CursorView: NSView {
             let s = dot.size * (1 - p * 0.5)
             ctx.setFillColor(NSColor(hex: dot.color, alpha: 0.7 * (1 - p)).cgColor)
             ctx.fillEllipse(in: CGRect(x: dot.point.x - s / 2, y: dot.point.y - s / 2, width: s, height: s))
+        }
+
+        if let captionText, captionRect.intersects(dirtyRect) {
+            let panel = NSBezierPath(roundedRect: captionRect, xRadius: 22, yRadius: 22)
+            NSColor(hex: Palette.ink, alpha: 0.86).setFill()
+            panel.fill()
+            captionText.draw(with: captionRect.insetBy(dx: 28, dy: 18), options: [.usesLineFragmentOrigin, .usesFontLeading])
         }
 
         drawCursor(ctx, now: now)

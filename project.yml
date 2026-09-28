@@ -38,3 +38,8 @@ targets:
         NSLocalNetworkUsageDescription: Googly Eyes finds the Mac app on your Wi-Fi so the character can look where it points.
         NSBonjourServices:
           - _googly._tcp
+        UIAppFonts:
+          - Fredoka.ttf
+          - IBMPlexSans.ttf
+          - IBMPlexMono-Regular.ttf
+          - IBMPlexMono-Medium.ttf
