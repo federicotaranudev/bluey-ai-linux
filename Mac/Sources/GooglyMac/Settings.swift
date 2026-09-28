@@ -36,6 +36,12 @@ final class Settings {
         set { defaults.set(newValue, forKey: "followMouse"); onChange?() }
     }
 
+    /// Voice volume, 0…1.
+    var volume: Double {
+        get { defaults.object(forKey: "volume") as? Double ?? 1 }
+        set { defaults.set(newValue, forKey: "volume") }
+    }
+
     var captions: Bool {
         get { defaults.object(forKey: "captions") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "captions"); onChange?() }

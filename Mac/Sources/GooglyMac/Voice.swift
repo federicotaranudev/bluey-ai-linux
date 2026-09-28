@@ -104,6 +104,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
             self.player = player
             player.delegate = self
             player.isMeteringEnabled = true
+            player.volume = Float(Settings.shared.volume)
             player.prepareToPlay()
             let count = speech.text.count
             for (index, charOffset) in words.chars.enumerated() {
@@ -128,6 +129,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
             let utterance = AVSpeechUtterance(string: speech.text)
             utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
             utterance.pitchMultiplier = 1.25
+            utterance.volume = Float(Settings.shared.volume)
             synth.speak(utterance)
             meter = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
                 guard let self else { return }
@@ -135,6 +137,11 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
                 self.level = self.synth.isSpeaking ? 0.45 + 0.4 * sin(t * 17) * sin(t * 5.3) : 0
             }
         }
+    }
+
+    /// Changes the volume of whatever is playing right now.
+    func applyVolume() {
+        player?.volume = Float(Settings.shared.volume)
     }
 
     func stop() {

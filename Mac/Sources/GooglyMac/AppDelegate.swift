@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 onRelease: { [weak self] in self?.conductor.releaseTalk() },
                                 onPress: { [weak self] in self?.conductor.pressTalk() })
         HotKeys.shared.register(keyCode: kVK_ANSI_A) { [weak self] in self?.askByTyping() }
+        HotKeys.shared.register(keyCode: kVK_ANSI_V) { [weak self] in self?.conductor.testVoice() }
 
         conductor.onChange = { [weak self] in self?.refreshIcon() }
         Listener.requestPermissions { problem in if let problem { NSLog("Googly: \(problem)") } }
@@ -73,6 +74,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setSize(_ item: NSMenuItem) { settings.cursorSize = Double(item.tag) }
     @objc private func setPhonePosition(_ item: NSMenuItem) { settings.phonePosition = Double(item.tag) / 100 }
+    @objc private func volumeChanged(_ slider: NSSlider) {
+        settings.volume = slider.doubleValue
+        conductor.voice.applyVolume()
+    }
+
+    @objc private func testVoice() { conductor.testVoice() }
+
     @objc private func toggleCaptions() { settings.captions.toggle() }
     @objc private func setVoice(_ item: NSMenuItem) {
         if let id = item.representedObject as? String { UserDefaults.standard.set(id, forKey: "voiceID") }
@@ -204,6 +212,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             voiceMenu.addItem(v)
         }
         menu.addItem(submenu("Voice", voiceMenu))
+
+        let volumeLabel = NSMenuItem(title: "Volume", action: nil, keyEquivalent: "")
+        volumeLabel.isEnabled = false
+        menu.addItem(volumeLabel)
+        let volumeItem = NSMenuItem()
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 28))
+        let slider = NSSlider(value: settings.volume, minValue: 0, maxValue: 1, target: self, action: #selector(volumeChanged(_:)))
+        slider.frame = NSRect(x: 20, y: 4, width: 200, height: 20)
+        slider.isContinuous = true
+        holder.addSubview(slider)
+        volumeItem.view = holder
+        menu.addItem(volumeItem)
+        menu.addItem(item("Test Voice", #selector(testVoice), key: "v"))
         menu.addItem(item("API Keys…", #selector(editKeys)))
         let captions = item("Live Captions", #selector(toggleCaptions))
         captions.state = settings.captions ? .on : .off

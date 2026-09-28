@@ -70,6 +70,21 @@ final class Conductor {
         answer(question)
     }
 
+    /// Says a sample line with the current voice and volume, no Claude needed.
+    func testVoice() {
+        cancel()
+        state = .thinking
+        engine.brainMood = .thinking
+        let line = "Hi! I'm your little blueberry. Is this loud enough?"
+        job = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let speech = (try? await self.voice.prepare(line)) ?? PreparedSpeech(text: line, audio: nil, charStarts: nil)
+            try? Task.checkCancellation()
+            guard !Task.isCancelled else { return }
+            self.perform(Reply(say: line, points: [], mood: "happy"), speech: speech, screen: nil)
+        }
+    }
+
     // MARK: Steps
 
     private var engine: CursorEngine { overlay.view.engine }
