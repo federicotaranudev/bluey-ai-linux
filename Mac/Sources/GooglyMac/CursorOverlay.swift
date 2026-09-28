@@ -92,7 +92,7 @@ final class CursorOverlay {
 final class CursorEngine {
     private(set) var mode: CursorMode = .docked
     var tip = CGPoint(x: -500, y: -500)
-    private var velocity = CGVector.zero
+    private(set) var velocity = CGVector.zero
     var angle: CGFloat = .pi / 4
     private var angleVelocity: CGFloat = 0
     private var placed = false
@@ -102,6 +102,10 @@ final class CursorEngine {
 
     struct Dot { var point: CGPoint; var born: Double; var size: CGFloat; var color: UInt32 }
     struct Ring { var point: CGPoint; var born: Double }
+    struct Sparkle { var point: CGPoint; var velocity: CGVector; var born: Double; var size: CGFloat; var spin: CGFloat }
+    var sparkles: [Sparkle] = []
+    /// When it last landed on a spot (for the little "click" squish).
+    var landedAt = -10.0
     var trail: [Dot] = []
     var rings: [Ring] = []
     private var lastDot = 0.0
@@ -185,8 +189,23 @@ final class CursorEngine {
         if ringPending, speed < 60, hypot(target.x - tip.x, target.y - tip.y) < 4 {
             ringPending = false
             rings.append(Ring(point: tip, born: now))
+            landedAt = now
+            // A burst of tiny stars, like he just clicked on it.
+            for i in 0..<7 {
+                let a = Double(i) / 7 * 2 * .pi + .random(in: -0.3...0.3)
+                let speed = CGFloat.random(in: 140...260)
+                sparkles.append(Sparkle(point: tip, velocity: CGVector(dx: cos(a) * speed, dy: sin(a) * speed),
+                                        born: now, size: .random(in: 7...13), spin: .random(in: -4...4)))
+            }
         }
         rings.removeAll { now - $0.born > 0.9 }
+        for i in sparkles.indices {
+            sparkles[i].point.x += sparkles[i].velocity.dx * t
+            sparkles[i].point.y += sparkles[i].velocity.dy * t
+            sparkles[i].velocity.dx *= 0.9
+            sparkles[i].velocity.dy = sparkles[i].velocity.dy * 0.9 + 200 * t
+        }
+        sparkles.removeAll { now - $0.born > 0.7 }
 
         if now > nextBlink {
             blinkUntil = now + 0.12
@@ -277,6 +296,10 @@ final class CursorView: NSView {
         var r = CGRect(x: engine.tip.x - s * 1.6, y: engine.tip.y - s * 1.6, width: s * 3.2, height: s * 3.2)
         for dot in engine.trail { r = r.union(CGRect(x: dot.point.x - 20, y: dot.point.y - 20, width: 40, height: 40)) }
         for ring in engine.rings { r = r.union(CGRect(x: ring.point.x - 90, y: ring.point.y - 90, width: 180, height: 180)) }
+        for sparkle in engine.sparkles { r = r.union(CGRect(x: sparkle.point.x - 16, y: sparkle.point.y - 16, width: 32, height: 32)) }
+        if let tether = tetherPoints() {
+            for p in [tether.from, tether.control, tether.to] { r = r.union(CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16)) }
+        }
         return r.insetBy(dx: -40, dy: -40)
     }
 
@@ -285,6 +308,48 @@ final class CursorView: NSView {
         ctx.clear(dirtyRect)
         guard Settings.shared.showCursor else { return }
         let now = CACurrentMediaTime()
+
+        // A dotted "remote control" line from the phone to the cursor while he's driving it.
+        if let tether = tetherPoints() {
+            let path = CGMutablePath()
+            path.move(to: tether.from)
+            path.addQuadCurve(to: tether.to, control: tether.control)
+            ctx.saveGState()
+            ctx.addPath(path)
+            ctx.setLineCap(.round)
+            ctx.setLineWidth(5)
+            ctx.setLineDash(phase: CGFloat(-now * 60), lengths: [0.1, 16])
+            ctx.setStrokeColor(NSColor(hex: Palette.berry1, alpha: 0.55 * engine.opacity).cgColor)
+            ctx.strokePath()
+            ctx.restoreGState()
+        }
+
+        for sparkle in engine.sparkles {
+            let p = CGFloat((now - sparkle.born) / 0.7)
+            drawStar(ctx, at: sparkle.point, size: sparkle.size * (1 - p * 0.6), angle: sparkle.spin * CGFloat(now - sparkle.born),
+                     color: NSColor(hex: p < 0.4 ? Palette.berry1 : Palette.berry2, alpha: 1 - p))
+        }
+
+        // A dotted "remote control" line from the phone to the cursor while he's driving it.
+        if let tether = tetherPoints() {
+            let path = CGMutablePath()
+            path.move(to: tether.from)
+            path.addQuadCurve(to: tether.to, control: tether.control)
+            ctx.saveGState()
+            ctx.addPath(path)
+            ctx.setLineCap(.round)
+            ctx.setLineWidth(5)
+            ctx.setLineDash(phase: CGFloat(-now * 60), lengths: [0.1, 16])
+            ctx.setStrokeColor(NSColor(hex: Palette.berry1, alpha: 0.55 * engine.opacity).cgColor)
+            ctx.strokePath()
+            ctx.restoreGState()
+        }
+
+        for sparkle in engine.sparkles {
+            let p = CGFloat((now - sparkle.born) / 0.7)
+            drawStar(ctx, at: sparkle.point, size: sparkle.size * (1 - p * 0.6), angle: sparkle.spin * CGFloat(now - sparkle.born),
+                     color: NSColor(hex: p < 0.4 ? Palette.berry1 : Palette.berry2, alpha: 1 - p))
+        }
 
         for ring in engine.rings {
             let p = CGFloat((now - ring.born) / 0.9)
@@ -316,7 +381,24 @@ final class CursorView: NSView {
         let s = engine.size
         let k = s / 96  // the design draws it in a 96 pt box
         ctx.saveGState()
-        ctx.translateBy(x: engine.tip.x, y: engine.tip.y)
+        // Hover gently while pointing, squish like a click when it lands, stretch along its flight.
+        var bob: CGFloat = 0
+        if case .pinned = engine.mode, now - engine.landedAt > 0.4 { bob = CGFloat(sin(now * 3.2)) * 2.5 }
+        ctx.translateBy(x: engine.tip.x, y: engine.tip.y + bob)
+        let since = now - engine.landedAt
+        if since < 0.45 {
+            let press = CGFloat(sin(since / 0.45 * .pi * 2) * exp(-since * 5)) * 0.16
+            ctx.scaleBy(x: 1 + press, y: 1 - press)
+        }
+        let v = engine.velocity
+        let speed = hypot(v.dx, v.dy)
+        if speed > 60 {
+            let dir = atan2(v.dy, v.dx)
+            let amount = min(0.28, speed / 5000)
+            ctx.rotate(by: dir)
+            ctx.scaleBy(x: 1 + amount, y: 1 - amount * 0.6)
+            ctx.rotate(by: -dir)
+        }
         ctx.rotate(by: engine.angle)
 
         guard engine.opacity > 0.01 else { ctx.restoreGState(); return }
@@ -360,6 +442,14 @@ final class CursorView: NSView {
 
         // Two little eyes, pupils toward the tip. They blink now and then.
         let blinking = now < engine.blinkUntil
+        // Pupils look toward the tip at rest, and ahead in the direction of flight while moving.
+        var look = CGPoint(x: -1, y: -1)
+        if speed > 120 {
+            let local = CGPoint(x: v.dx * cos(-engine.angle) - v.dy * sin(-engine.angle),
+                                y: v.dx * sin(-engine.angle) + v.dy * cos(-engine.angle))
+            let n = max(hypot(local.x, local.y), 1)
+            look = CGPoint(x: local.x / n * 1.4, y: local.y / n * 1.4)
+        }
         let eye = 18 * k
         let pupil = 9 * k
         for i in 0..<2 {
@@ -372,10 +462,37 @@ final class CursorView: NSView {
             } else {
                 ctx.fillEllipse(in: white)
                 ctx.setFillColor(NSColor(hex: Palette.ink).cgColor)
-                ctx.fillEllipse(in: CGRect(x: x + 2 * k, y: y + 2 * k, width: pupil, height: pupil))
+                let px = x + (eye - pupil) / 2 + look.x * 3.2 * k
+                let py = y + (eye - pupil) / 2 + look.y * 3.2 * k
+                ctx.fillEllipse(in: CGRect(x: px, y: py, width: pupil, height: pupil))
             }
         }
         ctx.restoreGState()
+    }
+
+    /// From the phone's spot at the bottom of the screen to the cursor, bowed a little like a string.
+    private func tetherPoints() -> (from: CGPoint, control: CGPoint, to: CGPoint)? {
+        guard case .pinned = engine.mode, engine.opacity > 0.05 else { return nil }
+        let from = CGPoint(x: bounds.width * Settings.shared.phonePosition, y: bounds.height + 4)
+        let to = engine.bodyCenter
+        let mid = CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2)
+        let sag = CGFloat(sin(CACurrentMediaTime() * 1.7)) * 18
+        let control = CGPoint(x: mid.x + (to.y - from.y) * 0.18 + sag, y: mid.y - (to.x - from.x) * 0.08)
+        return (from, control, to)
+    }
+
+    private func drawStar(_ ctx: CGContext, at p: CGPoint, size: CGFloat, angle: CGFloat, color: NSColor) {
+        let path = CGMutablePath()
+        for i in 0..<8 {
+            let r = i % 2 == 0 ? size : size * 0.38
+            let a = angle + CGFloat(i) * .pi / 4
+            let pt = CGPoint(x: p.x + cos(a) * r, y: p.y + sin(a) * r)
+            i == 0 ? path.move(to: pt) : path.addLine(to: pt)
+        }
+        path.closeSubpath()
+        ctx.addPath(path)
+        ctx.setFillColor(color.cgColor)
+        ctx.fillPath()
     }
 
     /// A square with three fully rounded corners and one sharp one at the origin.
