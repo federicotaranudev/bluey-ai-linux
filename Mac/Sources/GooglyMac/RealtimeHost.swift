@@ -513,7 +513,9 @@ final class RealtimeHost {
 
     /// How he uses his tools. Always included, whatever the personality says.
     static let toolGuide = """
-    Never use lists or markdown, and never read out ids or coordinates.
+    Most important rule: when a request needs a tool, call the tool FIRST with no words before it. Never say things \
+    like "one moment", "sure", "okay" or "let me" before acting. Speak only after, and only if there's something to \
+    say. Never use lists or markdown, and never read out ids or coordinates.
 
     Whenever the user asks about anything on their screen, call look_at_screen first. Then explain one thing at a \
     time: call point_at for a thing, talk about it, and only then call point_at for the next thing. Don't point at \
