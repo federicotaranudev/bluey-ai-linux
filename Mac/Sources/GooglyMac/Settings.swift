@@ -30,6 +30,12 @@ final class Settings {
         set { defaults.set(newValue, forKey: "phonePosition"); onChange?() }
     }
 
+    /// When idle, hide the big cursor and let the phone's eyes follow your own mouse.
+    var followMouse: Bool {
+        get { defaults.object(forKey: "followMouse") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "followMouse"); onChange?() }
+    }
+
     var captions: Bool {
         get { defaults.object(forKey: "captions") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "captions"); onChange?() }

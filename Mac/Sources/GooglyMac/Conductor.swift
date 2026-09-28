@@ -154,7 +154,7 @@ final class Conductor {
             self.engine.brainMood = nil
             self.engine.gazeOverride = nil
             self.overlay.view.caption = nil
-            if case .pinned = self.overlay.mode { self.overlay.mode = .docked }
+            if case .pinned = self.overlay.mode { self.overlay.goHome() }
         }
         resetWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)

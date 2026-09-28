@@ -6,7 +6,7 @@ enum VoiceError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .badKey: return "ElevenLabs didn't accept the API key."
+        case .badKey: return "ElevenLabs didn't accept the API key. It should start with sk_."
         case .failed(let why): return "ElevenLabs couldn't make the voice: \(why.prefix(160))"
         }
     }
@@ -77,7 +77,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
             request.httpBody = try JSONSerialization.data(withJSONObject: attempt.body)
             let (data, response) = try await URLSession.shared.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if code == 401 { throw VoiceError.badKey }
+            if code == 401 || String(data: data, encoding: .utf8)?.contains("invalid_api_key") == true { throw VoiceError.badKey }
             guard code == 200,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let b64 = json["audio_base64"] as? String, let audio = Data(base64Encoded: b64) else {

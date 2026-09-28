@@ -5,7 +5,7 @@ import GooglyShared
 enum CursorMode: Equatable {
     /// Waiting at the bottom edge of the screen, right above the phone.
     case docked
-    /// Glides after your mouse.
+    /// Hidden at home; the phone's eyes follow your own mouse instead.
     case following
     /// Flew to a spot and stays there while you move the mouse away.
     case pinned(CGPoint)
@@ -33,7 +33,13 @@ final class CursorOverlay {
         set { view.engine.setMode(newValue) }
     }
 
+    /// Where the cursor rests when nobody is pointing: hidden with eyes on your mouse, or parked above the phone.
+    var idleMode: CursorMode { Settings.shared.followMouse ? .following : .docked }
+
+    func goHome() { mode = idleMode }
+
     func start() {
+        mode = idleMode
         makeWindow()
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -90,6 +96,9 @@ final class CursorEngine {
     var angle: CGFloat = .pi / 4
     private var angleVelocity: CGFloat = 0
     private var placed = false
+    /// Fades the cursor out while the eyes are just following your mouse.
+    var opacity: CGFloat = 0
+    private var mouse = CGPoint.zero
 
     struct Dot { var point: CGPoint; var born: Double; var size: CGFloat; var color: UInt32 }
     struct Ring { var point: CGPoint; var born: Double }
@@ -129,16 +138,17 @@ final class CursorEngine {
         let target: CGPoint
         switch mode {
         case .docked: target = dockPoint(in: bounds)
-        case .following: target = mouse
+        case .following: target = dockPoint(in: bounds)
         case .pinned(let p): target = p
         }
+        self.mouse = mouse
         if !placed {
             tip = dockPoint(in: bounds)
             placed = true
         }
 
         // A slightly bouncy spring: quick, with a small overshoot when it lands.
-        let k: CGFloat = mode == .following ? 260 : 150
+        let k: CGFloat = 150
         let damping: CGFloat = 2 * sqrt(k) * 0.72
         let t = CGFloat(dt)
         velocity.dx += (k * (target.x - tip.x) - damping * velocity.dx) * t
@@ -146,10 +156,17 @@ final class CursorEngine {
         tip.x += velocity.dx * t
         tip.y += velocity.dy * t
 
+        // Visible whenever it's pointing or parked; in follow mode it fades out once it's home.
+        let nearHome = hypot(tip.x - target.x, tip.y - target.y) < 12
+        let wantOpacity: CGFloat = (mode == .following && nearHome) ? 0 : 1
+        opacity += (wantOpacity - opacity) * min(1, t * (wantOpacity > opacity ? 14 : 6))
+
         // The tip points away from the phone, so it always reads as the character pointing.
         let phone = phonePoint(in: bounds)
         let away = CGVector(dx: tip.x - phone.x, dy: tip.y - phone.y)
-        let targetAngle = mode == .docked ? .pi / 4 : atan2(-away.dy, -away.dx) - .pi / 4
+        let home: Bool
+        switch mode { case .docked, .following: home = true; case .pinned: home = false }
+        let targetAngle = home ? .pi / 4 : atan2(-away.dy, -away.dx) - .pi / 4
         let ka: CGFloat = 120
         angleVelocity += (ka * (targetAngle - angle) - 2 * sqrt(ka) * 0.9 * angleVelocity) * t
         angle += angleVelocity * t
@@ -185,7 +202,7 @@ final class CursorEngine {
     /// Eyes on the phone look at the cursor.
     func face(in bounds: CGSize, now: Double) -> FaceState {
         let phone = phonePoint(in: bounds)
-        let c = bodyCenter
+        let c = mode == .following ? mouse : bodyCenter
         var gx = max(-1, min(1, (c.x - phone.x) / (bounds.width * 0.5)))
         var gy = -max(0.15, min(1, (phone.y - c.y) / (bounds.height * 1.1)))
         if let g = gazeOverride { gx = g.x; gy = g.y }
@@ -302,6 +319,8 @@ final class CursorView: NSView {
         ctx.translateBy(x: engine.tip.x, y: engine.tip.y)
         ctx.rotate(by: engine.angle)
 
+        guard engine.opacity > 0.01 else { ctx.restoreGState(); return }
+        ctx.setAlpha(engine.opacity)
         let path = teardrop(size: s, tipRadius: 6 * k)
 
         // Shadow or glow under the body.

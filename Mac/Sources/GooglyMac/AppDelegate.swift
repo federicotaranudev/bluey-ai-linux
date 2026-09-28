@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ⌃⌥P point here, ⌃⌥F follow mouse, ⌃⌥D dock, ⌃⌥H hide, ⌃⌥T talk test.
         HotKeys.shared.register(keyCode: kVK_ANSI_P) { [weak self] in self?.pointHere() }
         HotKeys.shared.register(keyCode: kVK_ANSI_F) { [weak self] in self?.toggleFollow() }
-        HotKeys.shared.register(keyCode: kVK_ANSI_D) { [weak self] in self?.overlay.mode = .docked }
+        HotKeys.shared.register(keyCode: kVK_ANSI_D) { [weak self] in self?.overlay.goHome() }
         HotKeys.shared.register(keyCode: kVK_ANSI_H) { [weak self] in self?.toggleShow() }
         HotKeys.shared.register(keyCode: kVK_ANSI_T) { [weak self] in self?.overlay.talkTest() }
 
@@ -62,10 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleFollow() {
-        overlay.mode = overlay.mode == .following ? .docked : .following
+        settings.followMouse.toggle()
+        overlay.goHome()
     }
 
-    @objc private func dock() { overlay.mode = .docked }
+    @objc private func dock() { overlay.goHome() }
     @objc private func toggleShow() { settings.showCursor.toggle(); overlay.view.needsDisplay = true }
     @objc private func toggleGlow() { settings.glow.toggle() }
     @objc private func talkTest() { overlay.talkTest() }
@@ -145,12 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let point = item("Point Here", #selector(pointHere), key: "p")
         menu.addItem(point)
-        let follow = item("Follow My Mouse", #selector(toggleFollow), key: "f")
-        follow.state = overlay.mode == .following ? .on : .off
+        let follow = item("Eyes Follow My Mouse", #selector(toggleFollow), key: "f")
+        follow.state = settings.followMouse ? .on : .off
         menu.addItem(follow)
-        let dock = item("Go Home (Above Phone)", #selector(dock), key: "d")
-        dock.state = overlay.mode == .docked ? .on : .off
-        menu.addItem(dock)
+        menu.addItem(item("Stop Pointing", #selector(dock), key: "d"))
         menu.addItem(item("Talk Test", #selector(talkTest), key: "t"))
         menu.addItem(.separator())
 
