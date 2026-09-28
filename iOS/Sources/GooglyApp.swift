@@ -37,6 +37,7 @@ struct RootView: View {
         .phoneChrome()
         .onAppear {
             link.onFace = { [animator] face in animator.receive(face, at: Date().timeIntervalSinceReferenceDate) }
+            animator.localTalk = { [speaker = link.speaker] in speaker.level }
             link.start()
         }
         .onChange(of: link.connected) { _, connected in

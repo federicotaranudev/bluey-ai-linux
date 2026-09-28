@@ -27,6 +27,8 @@ final class FaceAnimator {
     var touchGaze: CGPoint?
     /// Mood picked on the phone itself (for testing without the Mac).
     var localMood: Mood?
+    /// Loudness of the voice playing on this phone, 0…1.
+    var localTalk: () -> Double = { 0 }
 
     func receive(_ face: FaceState, at time: Double) {
         target = face
@@ -66,7 +68,8 @@ final class FaceAnimator {
         gaze.x += gazeVelocity.dx * dt
         gaze.y += gazeVelocity.dy * dt
 
-        let wantTalk = live ? target.talk : (localMood == .talking ? 0.5 + 0.5 * sin(now * 19) * sin(now * 7.3) : 0)
+        var wantTalk = live ? target.talk : (localMood == .talking ? 0.5 + 0.5 * sin(now * 19) * sin(now * 7.3) : 0)
+        wantTalk = max(wantTalk, localTalk())
         talk += (wantTalk - talk) * min(1, dt * 25)
 
         if now > nextBlink {

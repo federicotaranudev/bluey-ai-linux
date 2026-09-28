@@ -36,14 +36,21 @@ public struct Packet: Codable, Sendable {
     public var hello: String?
     /// Voice volume 0…1. The Mac shares it, the phone sets it.
     public var volume: Double?
-    /// A request from the phone, e.g. "testVoice".
+    /// A request or event: "testVoice" (phone→Mac), "playing"/"done" (phone→Mac), "stopSpeech" (Mac→phone).
     public var command: String?
+    /// Speech audio (mp3, base64) for the phone to play.
+    public var audio: String?
+    /// Which speech an audio packet or a playing/done event belongs to.
+    public var speech: Int?
 
-    public init(face: FaceState? = nil, hello: String? = nil, volume: Double? = nil, command: String? = nil) {
+    public init(face: FaceState? = nil, hello: String? = nil, volume: Double? = nil, command: String? = nil,
+                audio: String? = nil, speech: Int? = nil) {
         self.face = face
         self.hello = hello
         self.volume = volume
         self.command = command
+        self.audio = audio
+        self.speech = speech
     }
 }
 

@@ -28,9 +28,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.settings.volume = min(1, max(0, volume))
                 self.conductor.voice.applyVolume()
             }
-            if packet.command == "testVoice" { self.conductor.testVoice() }
+            switch packet.command {
+            case "testVoice": self.conductor.testVoice()
+            case "playing", "done": self.conductor.voice.phoneEvent(packet.command!, id: packet.speech ?? -1)
+            default: break
+            }
         }
         server.start()
+        conductor.voice.sendToPhone = { [weak self] audio, id in self?.server.sendSpeech(audio, id: id) ?? false }
+        conductor.voice.stopOnPhone = { [weak self] in self?.server.stopSpeech() }
 
         // ⌃⌥P point here, ⌃⌥F follow mouse, ⌃⌥D dock, ⌃⌥H hide, ⌃⌥T talk test.
         HotKeys.shared.register(keyCode: kVK_ANSI_P) { [weak self] in self?.pointHere() }
@@ -89,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func testVoice() { conductor.testVoice() }
+    @objc private func toggleVoiceOnPhone() { settings.voiceOnPhone.toggle() }
 
     @objc private func toggleCaptions() { settings.captions.toggle() }
     @objc private func setVoice(_ item: NSMenuItem) {
@@ -234,6 +241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         volumeItem.view = holder
         menu.addItem(volumeItem)
         menu.addItem(item("Test Voice", #selector(testVoice), key: "v"))
+        let onPhone = item("Voice Plays From Phone", #selector(toggleVoiceOnPhone))
+        onPhone.state = settings.voiceOnPhone ? .on : .off
+        menu.addItem(onPhone)
         menu.addItem(item("API Keys…", #selector(editKeys)))
         let captions = item("Live Captions", #selector(toggleCaptions))
         captions.state = settings.captions ? .on : .off

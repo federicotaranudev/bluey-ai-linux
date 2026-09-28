@@ -92,6 +92,12 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
         throw VoiceError.failed(lastError)
     }
 
+    /// Plays the audio on the phone instead of the Mac. Returns false when no phone can take it.
+    var sendToPhone: ((_ audio: Data, _ id: Int) -> Bool)?
+    var stopOnPhone: (() -> Void)?
+    private var phoneSpeechID = 0
+    private var pendingPhone: (id: Int, times: [Double], fallback: DispatchWorkItem, speech: PreparedSpeech)?
+
     func play(_ speech: PreparedSpeech, onWord: @escaping (Int) -> Void, onDone: @escaping () -> Void) {
         stop()
         self.onWord = onWord
@@ -100,42 +106,88 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
         wordOffsetsUTF16 = words.utf16
         lastWord = -1
 
-        if let audio = speech.audio, let player = try? AVAudioPlayer(data: audio) {
-            self.player = player
-            player.delegate = self
-            player.isMeteringEnabled = true
-            player.volume = Float(Settings.shared.volume)
-            player.prepareToPlay()
-            let count = speech.text.count
-            for (index, charOffset) in words.chars.enumerated() {
-                let time: Double
-                if let starts = speech.charStarts, starts.count == count, charOffset < starts.count {
-                    time = starts[charOffset]
-                } else {
-                    time = player.duration * Double(charOffset) / Double(max(count, 1))  // estimate
-                }
-                let work = DispatchWorkItem { [weak self] in self?.onWord?(index) }
-                timers.append(work)
-                DispatchQueue.main.asyncAfter(deadline: .now() + time, execute: work)
+        guard let audio = speech.audio, let probe = try? AVAudioPlayer(data: audio) else {
+            speakWithMac(speech)
+            return
+        }
+        let count = speech.text.count
+        let times: [Double] = words.chars.map { charOffset in
+            if let starts = speech.charStarts, starts.count == count, charOffset < starts.count { return starts[charOffset] }
+            return probe.duration * Double(charOffset) / Double(max(count, 1))  // estimate
+        }
+
+        phoneSpeechID += 1
+        let id = phoneSpeechID
+        if Settings.shared.voiceOnPhone, sendToPhone?(audio, id) == true {
+            // Wait for the phone to say it started, so pointing stays in sync with its speaker.
+            let fallback = DispatchWorkItem { [weak self] in
+                guard let self, self.pendingPhone?.id == id else { return }
+                self.pendingPhone = nil
+                self.playOnMac(audio, times: times)
             }
-            player.play()
-            meter = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-                guard let self, let player = self.player else { return }
-                player.updateMeters()
-                let db = Double(player.averagePower(forChannel: 0))
-                self.level = min(1, max(0, pow(10, db / 20) * 3.2))
-            }
-        } else {
-            let utterance = AVSpeechUtterance(string: speech.text)
-            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-            utterance.pitchMultiplier = 1.25
-            utterance.volume = Float(Settings.shared.volume)
-            synth.speak(utterance)
-            meter = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                let t = CACurrentMediaTime()
-                self.level = self.synth.isSpeaking ? 0.45 + 0.4 * sin(t * 17) * sin(t * 5.3) : 0
-            }
+            pendingPhone = (id, times, fallback, speech)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: fallback)
+            return
+        }
+        playOnMac(audio, times: times)
+    }
+
+    /// The phone reports "playing" and "done" for the audio it was sent.
+    func phoneEvent(_ event: String, id: Int) {
+        guard id == phoneSpeechID else { return }
+        switch event {
+        case "playing":
+            guard let pending = pendingPhone, pending.id == id else { return }
+            pending.fallback.cancel()
+            pendingPhone = nil
+            status = status.replacingOccurrences(of: " (on phone)", with: "") + " (on phone)"
+            scheduleWords(pending.times)
+            // Safety net in case "done" never arrives.
+            let end = DispatchWorkItem { [weak self] in self?.finished() }
+            timers.append(end)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (pending.times.last ?? 0) + 8, execute: end)
+        case "done":
+            if onDone != nil { finished() }
+        default:
+            break
+        }
+    }
+
+    private func scheduleWords(_ times: [Double]) {
+        for (index, time) in times.enumerated() {
+            let work = DispatchWorkItem { [weak self] in self?.onWord?(index) }
+            timers.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + time, execute: work)
+        }
+    }
+
+    private func playOnMac(_ audio: Data, times: [Double]) {
+        guard let player = try? AVAudioPlayer(data: audio) else { finished(); return }
+        self.player = player
+        player.delegate = self
+        player.isMeteringEnabled = true
+        player.volume = Float(Settings.shared.volume)
+        player.prepareToPlay()
+        scheduleWords(times)
+        player.play()
+        meter = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self, let player = self.player else { return }
+            player.updateMeters()
+            let db = Double(player.averagePower(forChannel: 0))
+            self.level = min(1, max(0, pow(10, db / 20) * 3.2))
+        }
+    }
+
+    private func speakWithMac(_ speech: PreparedSpeech) {
+        let utterance = AVSpeechUtterance(string: speech.text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.pitchMultiplier = 1.25
+        utterance.volume = Float(Settings.shared.volume)
+        synth.speak(utterance)
+        meter = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let t = CACurrentMediaTime()
+            self.level = self.synth.isSpeaking ? 0.45 + 0.4 * sin(t * 17) * sin(t * 5.3) : 0
         }
     }
 
@@ -144,7 +196,11 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
         player?.volume = Float(Settings.shared.volume)
     }
 
-    func stop() {
+    func stop() { stop(silencePhone: true) }
+
+    private func stop(silencePhone: Bool) {
+        if let pending = pendingPhone { pending.fallback.cancel(); pendingPhone = nil }
+        if silencePhone, onDone != nil, player == nil, !synth.isSpeaking { stopOnPhone?() }
         timers.forEach { $0.cancel() }
         timers = []
         meter?.invalidate()
@@ -159,7 +215,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate 
 
     private func finished() {
         let done = onDone
-        stop()
+        stop(silencePhone: false)
         done?()
     }
 

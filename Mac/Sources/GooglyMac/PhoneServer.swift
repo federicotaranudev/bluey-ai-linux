@@ -77,6 +77,18 @@ final class PhoneServer {
         link.start()
     }
 
+    /// Sends speech audio to the phones to play. Returns false when no phone is connected.
+    func sendSpeech(_ audio: Data, id: Int) -> Bool {
+        guard !phones.isEmpty else { return false }
+        let packet = Packet(audio: audio.base64EncodedString(), speech: id)
+        for phone in phones.values { phone.link.send(packet) }
+        return true
+    }
+
+    func stopSpeech() {
+        for phone in phones.values { phone.link.send(Packet(command: "stopSpeech")) }
+    }
+
     /// Tells every phone the current volume (after it changes on the Mac).
     func sendVolume(_ volume: Double) {
         for phone in phones.values { phone.link.send(Packet(volume: volume)) }
