@@ -3,6 +3,8 @@ import GooglyShared
 
 /// The Mac's half of live voice. The phone runs the OpenAI Realtime session (its mic, its speaker);
 /// the Mac hands it a short-lived key, runs its tools (look, point, and use the computer) and shows captions.
+/// Everything here runs on the main thread, alongside the cursor it drives.
+@MainActor
 final class RealtimeHost {
     static let model = "gpt-realtime-2.1"
 

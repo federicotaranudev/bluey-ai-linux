@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HotKeys.shared.register(keyCode: kVK_ANSI_D) { [weak self] in self?.overlay.goHome() }
         HotKeys.shared.register(keyCode: kVK_ANSI_H) { [weak self] in self?.toggleShow() }
         HotKeys.shared.register(keyCode: kVK_ANSI_T) { [weak self] in self?.overlay.talkTest() }
+        // ⌃⌥S stops him using the computer right away.
+        HotKeys.shared.register(keyCode: kVK_ANSI_S) { [weak self] in self?.stopActions() }
 
         if Keychain.get(.openai) == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.editKeys() }
@@ -62,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func dock() { overlay.goHome() }
-    @objc private func toggleShow() { settings.showCursor.toggle(); overlay.view.needsDisplay = true }
+    @objc private func toggleShow() { settings.showCursor.toggle() }
     @objc private func toggleGlow() { settings.glow.toggle() }
     @objc private func setTrail(_ item: NSMenuItem) {
         if let raw = item.representedObject as? String, let trail = PointerTrail(rawValue: raw) { settings.trail = trail }
@@ -75,13 +77,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         server.broadcast(Packet(command: host.awake ? "sleep" : "wake"))
     }
 
+    @objc private func stopActions() {
+        host.stopActions()
+    }
+
+    @objc private func toggleComputerControl() {
+        settings.computerControl.toggle()
+        if settings.computerControl && !ComputerControl.isTrusted { ComputerControl.askForPermission() }
+        restartIfAwake()  // his tools change with this switch
+    }
+
+    @objc private func allowComputerControl() {
+        ComputerControl.askForPermission()
+        ComputerControl.openAccessibilitySettings()
+    }
+
     @objc private func toggleCaptions() { settings.captions.toggle() }
     @objc private func setVoice(_ item: NSMenuItem) {
         if let voice = item.representedObject as? String { UserDefaults.standard.set(voice, forKey: "realtimeVoice") }
         restartIfAwake()
     }
 
-    /// Wakes him again so a new voice or personality takes effect right away.
+    /// Wakes him again so a new voice, personality or set of tools takes effect right away.
     private func restartIfAwake() {
         guard host.awake else { return }
         server.broadcast(Packet(command: "sleep"))
@@ -152,6 +169,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         wake.target = self
         wake.isEnabled = !phones.isEmpty
         menu.addItem(wake)
+        menu.addItem(.separator())
+
+        let control = item("Let Him Use the Computer", #selector(toggleComputerControl))
+        control.state = settings.computerControl ? .on : .off
+        menu.addItem(control)
+        if settings.computerControl && !ComputerControl.isTrusted {
+            menu.addItem(item("Allow Clicking and Typing (Accessibility)…", #selector(allowComputerControl)))
+        }
+        menu.addItem(item("Stop Him", #selector(stopActions), key: "s"))
         menu.addItem(.separator())
 
         let point = item("Point Here", #selector(pointHere), key: "p")
