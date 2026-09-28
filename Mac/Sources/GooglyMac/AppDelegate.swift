@@ -218,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(submenu("Phone Sits Under", phoneMenu))
 
         let voiceMenu = NSMenu()
-        let current = UserDefaults.standard.string(forKey: "realtimeVoice") ?? "marin"
+        let current = UserDefaults.standard.string(forKey: "realtimeVoice") ?? "cedar"
         for voice in Self.voices {
             let v = item(voice.capitalized, #selector(setVoice(_:)))
             v.representedObject = voice
