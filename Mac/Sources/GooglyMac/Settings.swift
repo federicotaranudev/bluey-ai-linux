@@ -41,6 +41,12 @@ final class Settings {
         set { defaults.set(newValue, forKey: "captions"); onChange?() }
     }
 
+    /// Lets him click, type, press keys and open things when you ask.
+    var computerControl: Bool {
+        get { defaults.object(forKey: "computerControl") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "computerControl"); onChange?() }
+    }
+
     /// How the cursor's path shows while it flies.
     var trail: PointerTrail {
         get { PointerTrail(rawValue: defaults.string(forKey: "trail") ?? "") ?? .comet }

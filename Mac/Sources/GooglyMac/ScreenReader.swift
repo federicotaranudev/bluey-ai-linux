@@ -2,7 +2,7 @@ import AppKit
 import ScreenCaptureKit
 import Vision
 
-/// One thing on screen the character can point at: a line of text or a single word.
+/// One thing on screen the character can point at or click: a control, a line of text or a single word.
 struct Target {
     let id: String
     let text: String
@@ -14,8 +14,15 @@ struct ScreenSnapshot {
     let jpeg: Data
     let lines: [(line: Target, words: [Target])]
     let size: CGSize
+    /// The frontmost app and its clickable controls (empty without Accessibility permission).
+    var app: String? = nil
+    var controls: [ControlsReader.Control] = []
 
     func target(_ id: String) -> Target? {
+        let id = id.trimmingCharacters(in: .whitespaces).uppercased()
+        if let control = controls.first(where: { $0.id == id }) {
+            return Target(id: control.id, text: control.label.isEmpty ? control.kind : control.label, rect: control.rect)
+        }
         for entry in lines {
             if entry.line.id == id { return entry.line }
             if let word = entry.words.first(where: { $0.id == id }) { return word }
@@ -29,10 +36,21 @@ struct ScreenSnapshot {
             let x = Int(r.midX / size.width * 1000), y = Int(r.midY / size.height * 1000)
             return "@\(x),\(y)"
         }
-        return lines.map { entry in
+        var out: [String] = []
+        if let app { out.append("Frontmost app: \(app)") }
+        if !controls.isEmpty {
+            out.append("Controls (click these by id):")
+            out += controls.map { c in
+                "\(c.id) \(c.kind) \(grid(c.rect))" + (c.label.isEmpty ? "" : " \"\(c.label)\"")
+            }
+        }
+        out.append("Text on screen (L = line, W = word, @x,y on a 0-1000 grid):")
+        if lines.isEmpty { out.append("(no text found)") }
+        out += lines.map { entry in
             let words = entry.words.count > 1 ? " | " + entry.words.map { "\($0.id)=\($0.text)" }.joined(separator: " ") : ""
             return "\(entry.line.id) \(grid(entry.line.rect)) \"\(entry.line.text)\"\(words)"
-        }.joined(separator: "\n")
+        }
+        return out.joined(separator: "\n")
     }
 }
 
@@ -57,8 +75,11 @@ enum ScreenReader {
         config.showsCursor = false
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         let size = CGSize(width: display.width, height: display.height)
+        // Read the front app's controls at the same time as the text.
+        let controlsTask = Task.detached(priority: .userInitiated) { ControlsReader.read(screen: size) }
         let lines = try recognize(image, in: size)
-        return ScreenSnapshot(jpeg: jpeg(image, maxEdge: 1568), lines: lines, size: size)
+        let controls = await controlsTask.value
+        return ScreenSnapshot(jpeg: jpeg(image, maxEdge: 1280), lines: lines, size: size, app: controls.app, controls: controls.controls)
     }
 
     static func recognize(_ image: CGImage, in size: CGSize) throws -> [(line: Target, words: [Target])] {
