@@ -79,7 +79,7 @@ enum ScreenReader {
         let controlsTask = Task.detached(priority: .userInitiated) { ControlsReader.read(screen: size) }
         let lines = try recognize(image, in: size)
         let controls = await controlsTask.value
-        return ScreenSnapshot(jpeg: jpeg(image, maxEdge: 1280), lines: lines, size: size, app: controls.app, controls: controls.controls)
+        return ScreenSnapshot(jpeg: jpeg(image, maxEdge: 1100), lines: lines, size: size, app: controls.app, controls: controls.controls)
     }
 
     static func recognize(_ image: CGImage, in size: CGSize) throws -> [(line: Target, words: [Target])] {
@@ -128,6 +128,6 @@ enum ScreenReader {
         NSGraphicsContext.current?.imageInterpolation = .high
         NSGraphicsContext.current?.cgContext.draw(image, in: CGRect(origin: .zero, size: size))
         NSGraphicsContext.restoreGraphicsState()
-        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) ?? Data()
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.72]) ?? Data()
     }
 }

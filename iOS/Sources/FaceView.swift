@@ -40,8 +40,8 @@ final class FaceAnimator {
 
     private var target = FaceState()
     private var lastPacket = -100.0
-    private var gazeX = Spring(0, stiffness: 340, damping: 0.62)
-    private var gazeY = Spring(0, stiffness: 340, damping: 0.62)
+    private var gazeX = Spring(0, stiffness: 260, damping: 0.82)
+    private var gazeY = Spring(0, stiffness: 260, damping: 0.82)
     private var pupil = Spring(1, stiffness: 160, damping: 0.5)
     private var browLift = Spring(0, stiffness: 180, damping: 0.55)
     private var browTilt = Spring(0, stiffness: 150, damping: 0.6)
@@ -107,9 +107,9 @@ final class FaceAnimator {
         }
         if mood == .thinking { want = CGPoint(x: 0.6 + 0.08 * sin(now * 1.3), y: -0.85) }
         if now > nextJitter {
-            let amount = !awake ? 0.015 : (mood == .talking || mood == .listening ? 0.14 : 0.08)
+            let amount = !awake ? 0.015 : (mood == .talking || mood == .listening ? 0.09 : 0.06)
             jitter = CGPoint(x: .random(in: -amount...amount), y: .random(in: -amount...amount))
-            nextJitter = now + .random(in: 0.25...0.9)
+            nextJitter = now + .random(in: 0.5...1.4)
         }
         gazeX.step(to: want.x + jitter.x, dt: dt)
         gazeY.step(to: want.y + jitter.y, dt: dt)

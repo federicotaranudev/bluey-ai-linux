@@ -39,9 +39,9 @@ struct TimingCurve {
     let x1: Double, y1: Double, x2: Double, y2: Double
 
     /// Starts gently, then arrives with a long, soft deceleration.
-    static let launch = TimingCurve(x1: 0.36, y1: 0, x2: 0.18, y2: 1)
+    static let launch = TimingCurve(x1: 0.42, y1: 0, x2: 0.22, y2: 1)
     /// Keeps the speed it already had (for a change of plans mid-flight), then settles the same way.
-    static let redirect = TimingCurve(x1: 0.25, y1: 0.25, x2: 0.18, y2: 1)
+    static let redirect = TimingCurve(x1: 0.25, y1: 0.25, x2: 0.22, y2: 1)
     /// Even and deliberate, for drags.
     static let steady = TimingCurve(x1: 0.42, y1: 0, x2: 0.38, y2: 1)
 
@@ -226,7 +226,7 @@ final class CursorEngine {
         // Upright like a normal cursor while out and about (tipped up when parked), leaning a touch into the motion.
         let lean = max(-0.2, min(0.2, velocity.dx / 2800))
         let targetAngle: CGFloat = (isHome ? .pi / 4 : 0) + lean
-        let k: CGFloat = 38
+        let k: CGFloat = 24
         let t = CGFloat(dt)
         angleVelocity += (k * (targetAngle - angle) - 2 * sqrt(k) * angleVelocity) * t
         angle += angleVelocity * t
@@ -251,7 +251,7 @@ final class CursorEngine {
             return
         }
 
-        var duration = min(1.2, max(0.45, 0.34 + 0.11 * log2(1 + Double(distance) / 24)))
+        var duration = min(1.2, max(0.45, 0.4 + 0.12 * log2(1 + Double(distance) / 24)))
         if dragging { duration = min(1.6, max(0.6, duration * 1.45)) }
 
         let direction = CGPoint(x: dx / distance, y: dy / distance)

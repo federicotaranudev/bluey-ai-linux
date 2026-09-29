@@ -258,7 +258,7 @@ final class RealtimeHost {
             await ComputerControl.click(at: target.point, right: right, count: count)
             try? await Task.sleep(for: .milliseconds(60))
             ComputerControl.warp(to: saved)  // hand your pointer back where you left it
-            try? await Task.sleep(for: .milliseconds(650))
+            try? await Task.sleep(for: .milliseconds(380))
             let verb = right ? "Right-clicked" : count == 2 ? "Double-clicked" : "Clicked"
             return await look(prefix: "\(verb) \(target.name == "that spot" ? "there" : "\"\(target.name)\"").")
 
@@ -279,7 +279,7 @@ final class RealtimeHost {
                 try? await Task.sleep(for: .milliseconds(120))
                 _ = try? ComputerControl.press("return")
                 view.bubble("↩")
-                try? await Task.sleep(for: .milliseconds(900))
+                try? await Task.sleep(for: .milliseconds(550))
                 return await look(prefix: "Typed it and pressed Return.")
             }
             return ("Typed it.", nil)
@@ -298,7 +298,7 @@ final class RealtimeHost {
             } catch {
                 return (error.localizedDescription, nil)
             }
-            try? await Task.sleep(for: .milliseconds(650))
+            try? await Task.sleep(for: .milliseconds(380))
             return await look(prefix: "Pressed \(keys).")
 
         case "scroll":
@@ -320,7 +320,7 @@ final class RealtimeHost {
             view.bubble(arrow)
             await ComputerControl.scroll(dx: dx, dy: dy, at: point)
             ComputerControl.warp(to: saved)
-            try? await Task.sleep(for: .milliseconds(450))
+            try? await Task.sleep(for: .milliseconds(280))
             return await look(prefix: "Scrolled \(direction).")
 
         case "drag":
@@ -347,7 +347,7 @@ final class RealtimeHost {
             engine.dragging = false
             try? await Task.sleep(for: .milliseconds(60))
             ComputerControl.warp(to: saved)
-            try? await Task.sleep(for: .milliseconds(450))
+            try? await Task.sleep(for: .milliseconds(280))
             return await look(prefix: "Dragged it.")
 
         case "open_app":
@@ -356,7 +356,7 @@ final class RealtimeHost {
             if engine.isHome { overlay.mode = .docked }
             view.bubble("Opening \(name)")
             let result = await ComputerControl.openApp(name)
-            try? await Task.sleep(for: .milliseconds(1500))
+            try? await Task.sleep(for: .milliseconds(900))
             return await look(prefix: result)
 
         case "open_url":
@@ -364,7 +364,7 @@ final class RealtimeHost {
             if engine.isHome { overlay.mode = .docked }
             let result = ComputerControl.openURL(url)
             view.bubble(result.hasPrefix("Opened ") ? String(result.dropFirst(7).dropLast()) : "Hmm")
-            try? await Task.sleep(for: .milliseconds(1800))
+            try? await Task.sleep(for: .milliseconds(1100))
             return await look(prefix: result)
 
         default:
@@ -554,12 +554,13 @@ final class RealtimeHost {
             "audio": [
                 "input": [
                     "format": ["type": "audio/pcm", "rate": 24000],
-                    "turn_detection": ["type": "semantic_vad", "eagerness": "high"],
+                    "turn_detection": ["type": "server_vad", "threshold": 0.45, "prefix_padding_ms": 300, "silence_duration_ms": 420],
+                    "noise_reduction": ["type": "near_field"],
                     "transcription": ["model": "gpt-4o-mini-transcribe"],
                 ],
                 "output": [
                     "format": ["type": "audio/pcm", "rate": 24000],
-                    "voice": UserDefaults.standard.string(forKey: "realtimeVoice") ?? "cedar",
+                    "voice": UserDefaults.standard.string(forKey: "realtimeVoice") ?? "ballad",
                 ],
             ],
             "tools": tools,
