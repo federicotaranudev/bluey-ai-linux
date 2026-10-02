@@ -14,7 +14,9 @@ cp Shared/Fonts/*.ttf "$APP/Contents/Resources/"
 
 # Sign with your Apple Development certificate when there is one, so macOS remembers the
 # Screen Recording and Microphone permissions across rebuilds. Otherwise sign ad hoc.
-IDENTITY=$(security find-identity -v -p codesigning | grep -o '"Apple Development[^"]*"' | head -1 | tr -d '"' || true)
+# Use the certificate's hash, since the same name can appear twice in the keychain.
+IDENTITY=$(security find-identity -v -p codesigning | grep '"Apple Development' | head -1 | awk '{print $2}' || true)
+xattr -cr "$APP"  # iCloud-synced folders add Finder info that codesign rejects
 codesign --force --sign "${IDENTITY:--}" "$APP"
 
 echo "Built $APP"
