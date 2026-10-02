@@ -3,7 +3,7 @@ import Foundation
 /// One line in a session: something you said (overheard as context), a question you asked by holding
 /// the screen, or one of his replies.
 struct TranscriptEntry: Codable, Identifiable, Equatable {
-    enum Kind: String, Codable { case heard, asked, reply }
+    enum Kind: String, Codable { case heard, asked, reply, report }
 
     var id = UUID()
     var kind: Kind
@@ -41,6 +41,7 @@ struct BlueySession: Codable, Identifiable, Equatable {
             case .heard: who = "You"
             case .asked: who = "You asked"
             case .reply: who = "Bluey"
+            case .report: who = "Research"
             }
             lines.append("[\(time.string(from: entry.time))] \(who): \(entry.text)")
         }
@@ -115,6 +116,12 @@ final class SessionStore: ObservableObject {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         update { $0.entries.append(TranscriptEntry(kind: .reply, text: text, time: Date())) }
+    }
+
+    func report(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        update { $0.entries.append(TranscriptEntry(kind: .report, text: text, time: Date())) }
     }
 
     func delete(_ id: UUID) {

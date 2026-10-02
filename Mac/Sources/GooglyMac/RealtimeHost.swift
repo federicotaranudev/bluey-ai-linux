@@ -9,6 +9,7 @@ final class RealtimeHost {
     static let model = "gpt-realtime-2.1"
 
     private let overlay: CursorOverlay
+    private let reports = ReportPanel()
     private var snapshot: ScreenSnapshot?
     private var captionClear: DispatchWorkItem?
     private var readingDone: DispatchWorkItem?
@@ -74,6 +75,29 @@ final class RealtimeHost {
         }
     }
 
+    /// GOOGLY_DEMO_RESEARCH="question": runs a real research call and saves pictures of the card.
+    func demoResearch(_ question: String, out: String) {
+        Task { @MainActor in
+            reports.showLoading(question)
+            try? await Task.sleep(for: .milliseconds(400))
+            reports.snapshot(expanded: false, to: out + "-loading.png")
+            do {
+                let report = try await WebResearch.research(question, context: nil)
+                reports.show(report)
+                print(report.plainText, report.sources.map(\.url))
+            } catch {
+                reports.showError(error.localizedDescription)
+                print(error)
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+            reports.snapshot(expanded: false, to: out + "-preview.png")
+            reports.snapshot(expanded: true, to: out + "-open.png")
+            try? await Task.sleep(for: .milliseconds(800))
+            reports.snapshot(expanded: true, to: out + "-open.png")
+            exit(0)
+        }
+    }
+
     func setAwake(_ on: Bool) {
         awake = on
         engine.awake = on
@@ -121,6 +145,10 @@ final class RealtimeHost {
             tool("point_at_spot",
                  "Point at something that isn't text (a shape, arrow, chart bar, image) using its position on the 0-1000 grid of the last screenshot.",
                  ["x": gridX, "y": gridY], required: ["x", "y"]),
+            tool("web_research",
+                 "Look something up on the web and put a short report (title plus up to four paragraphs, with sources) on the user's screen. Use for anything you're not sure of, anything recent, or anything that needs facts, prices, news or details. Before calling it, point at the relevant thing if there is one and reply with one short line that ends with \"doing some research…\".",
+                 ["question": ["type": "string", "description": "What to research, as a clear, self-contained question."]],
+                 required: ["question"]),
             tool("stop_pointing", "Bring your cursor back home when you're done pointing."),
             tool("go_to_sleep",
                  "Go back to quietly following the user's mouse with your eyes. Use when the user says bye, thanks that's all, or asks you to sleep."),
@@ -160,6 +188,9 @@ final class RealtimeHost {
         return list
     }
 
+    /// Separates his instructions from the report text, so the phone can save the report in the transcript.
+    static let reportMarker = "\n---REPORT---\n"
+
     private static let actionNames: Set<String> = ["click", "type_text", "press_keys", "scroll", "drag", "open_app", "open_url"]
 
     private func runTool(_ name: String, arguments: String) async -> (text: String, image: String?) {
@@ -185,6 +216,19 @@ final class RealtimeHost {
         case "stop_pointing":
             requestHome()
             return ("Your cursor will head home once you finish talking.", nil)
+        case "web_research":
+            let question = (args["question"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !question.isEmpty else { return ("What should I research?", nil) }
+            reports.showLoading(question)
+            do {
+                let screenText = snapshot?.lines.prefix(40).map { $0.line.text }.joined(separator: " / ")
+                let report = try await WebResearch.research(question, context: screenText)
+                reports.show(report)
+                return ("The full report is now in a card on the user's screen. Reply with ONE short line: the key takeaway in your own words. Don't repeat the report." + Self.reportMarker + report.plainText, nil)
+            } catch {
+                reports.showError(error.localizedDescription)
+                return ("Research failed: \(error.localizedDescription). Tell the user in a few words.", nil)
+            }
         case "go_to_sleep":
             // The phone closes the session after this call; the Mac just tidies up.
             return ("Going to sleep. Say a very short goodbye.", nil)
@@ -541,7 +585,8 @@ final class RealtimeHost {
     happens when the user holds the phone screen to ask you something. Their most recent words are the question; \
     use the earlier talk as context.
 
-    Most important rule: when a request needs a tool, call the tool FIRST with no words before it. Never write \
+    Most important rule: when a request needs a tool, call the tool FIRST with no words before it (the one \
+    exception is web_research, described below). Never write \
     things like "one moment", "sure", "okay" or "let me". Reply only after, in one short line. No lists, no \
     markdown, never mention ids or coordinates.
 
@@ -551,6 +596,11 @@ final class RealtimeHost {
     mouse pointer, which look_at_screen tells you. Point at the most specific thing (a word or number rather than a \
     whole line). For shapes, arrows or charts with no text, use point_at_spot. If the screen may have changed, look \
     again. When the user says goodbye or asks you to sleep, reply with a very short goodbye and call go_to_sleep.
+
+    Research: when answering well needs facts you're not sure of, anything recent, or details from the web, use \
+    web_research. In that one response: point at the relevant thing on screen if there is one, write one short \
+    line that ends with "doing some research…", then call web_research. The report appears in a card on the \
+    screen; afterwards reply with just one short takeaway line.
     """
 
     static let computerGuide = """

@@ -116,6 +116,7 @@ struct RootView: View {
         live.onUserTurn = { [store] item, asked in store.placeholder(itemID: item, asked: asked) }
         live.onUserWords = { [store] item, text, asked in store.heard(itemID: item, text: text, asked: asked) }
         live.onReply = { [store] text in store.reply(text) }
+        live.onReport = { [store] text in store.report(text) }
         live.onCaption = { [link] text, finished in
             link.send(Packet(command: finished ? "captionDone" : "caption", text: text))
         }

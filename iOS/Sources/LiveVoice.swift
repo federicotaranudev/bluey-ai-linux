@@ -25,6 +25,7 @@ final class LiveVoice: NSObject, ObservableObject {
     var onUserTurn: ((_ itemID: String, _ asked: Bool) -> Void)?
     var onUserWords: ((_ itemID: String, _ text: String, _ asked: Bool) -> Void)?
     var onReply: ((String) -> Void)?
+    var onReport: ((String) -> Void)?
 
     /// Loudness of his chirp right now, 0…1.
     private(set) var level: Double = 0
@@ -266,6 +267,9 @@ final class LiveVoice: NSObject, ObservableObject {
             let finish: (String, String?) -> Void = { [weak self] output, image in
                 DispatchQueue.main.async {
                     guard let self, self.socket != nil else { return }
+                    if name == "web_research", let range = output.range(of: "\n---REPORT---\n") {
+                        self.onReport?(String(output[range.upperBound...]))
+                    }
                     self.send(["type": "conversation.item.create",
                                "item": ["type": "function_call_output", "call_id": callID, "output": output]])
                     if let image { images.append(image) }

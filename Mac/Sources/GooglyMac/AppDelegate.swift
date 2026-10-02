@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlay.onFace = { [weak self] face in self?.server.send(face) }
         overlay.start()
         showDemoBubbleIfAsked()
+        if let question = ProcessInfo.processInfo.environment["GOOGLY_DEMO_RESEARCH"] {
+            host.demoResearch(question, out: ProcessInfo.processInfo.environment["GOOGLY_DEMO_OUT"] ?? "/tmp/googly-report")
+        }
         server.onPhonesChanged = { [weak self] names in
             self?.refreshIcon()
             if names.isEmpty, self?.host.awake == true { self?.host.setAwake(false) }

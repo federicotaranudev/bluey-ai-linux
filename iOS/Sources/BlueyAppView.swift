@@ -291,6 +291,7 @@ struct SessionDetailView: View {
 
 private struct EntryView: View {
     let entry: TranscriptEntry
+    @State private var open = false
 
     var body: some View {
         switch entry.kind {
@@ -326,6 +327,35 @@ private struct EntryView: View {
                     .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 Spacer(minLength: 120)
             }
+        case .report:
+            let lines = entry.text.components(separatedBy: "\n\n")
+            VStack(alignment: .leading, spacing: 8) {
+                Button { withAnimation(.spring(duration: 0.3)) { open.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass").foregroundStyle(Color(hex: Palette.berry2))
+                        Text(lines.first ?? "Research")
+                            .font(.fredoka(16))
+                            .foregroundStyle(Color(hex: Palette.ink))
+                            .multilineTextAlignment(.leading)
+                        Spacer()
+                        Image(systemName: open ? "minus" : "plus")
+                            .font(.system(size: 12, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Circle().fill(Color(hex: Palette.berry2)))
+                    }
+                }
+                .buttonStyle(.plain)
+                Text(lines.dropFirst().joined(separator: "\n\n"))
+                    .font(.plexSans(14))
+                    .foregroundStyle(Color(hex: Palette.ink))
+                    .lineLimit(open ? nil : 3)
+            }
+            .padding(14)
+            .background(Color(hex: 0xEEF0FF), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color(hex: Palette.berry2), lineWidth: 2))
+            .padding(.leading, 36)
+            .padding(.trailing, 80)
         }
     }
 }
