@@ -554,7 +554,7 @@ final class RealtimeHost {
             "audio": [
                 "input": [
                     "format": ["type": "audio/pcm", "rate": 24000],
-                    "turn_detection": ["type": "server_vad", "threshold": 0.45, "prefix_padding_ms": 300, "silence_duration_ms": 420],
+                    "turn_detection": ["type": "server_vad", "threshold": 0.5, "prefix_padding_ms": 300, "silence_duration_ms": 420],
                     "noise_reduction": ["type": "near_field"],
                     "transcription": ["model": "gpt-4o-mini-transcribe"],
                 ],
