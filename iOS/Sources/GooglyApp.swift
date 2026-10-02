@@ -153,67 +153,69 @@ struct RootView: View {
     }
 }
 
-/// Shows which mode he's in: a colored glow around the screen edge plus a little label in the corner.
+/// Shows which mode he's in: a solid border hugging the screen's own rounded corners (blue while he listens),
+/// plus a small label in the corner. Following your mouse is just a little eye icon. No glows.
 struct ModeIndicator: View {
     let state: LiveVoice.State
 
     private struct Look {
         let color: Color
-        let label: String
+        let label: String?
         let icon: String
-        let glow: Double      // how strong the edge glow is, 0 = none
-        let pulse: Double     // pulses per second
+        let border: CGFloat   // 0 = no border
+        let pulse: Double     // pulses per second (opacity only)
     }
+
+    private static let blue = Color(hex: 0x4F8BFF)
 
     private var look: Look {
         switch state {
-        case .asleep:    return Look(color: Color(hex: Palette.inkSoft), label: "Following your mouse", icon: "eye", glow: 0, pulse: 0)
-        case .waking:    return Look(color: Color(hex: 0xFFD66B), label: "Waking up", icon: "sun.max.fill", glow: 0.55, pulse: 1.6)
-        case .listening: return Look(color: Color(hex: 0x5BE49B), label: "Listening · hold to ask", icon: "ear", glow: 0.45, pulse: 0.5)
-        case .asking:    return Look(color: Color(hex: Palette.berry1), label: "I'm all ears", icon: "mic.fill", glow: 1, pulse: 1.4)
-        case .thinking:  return Look(color: Color(hex: 0xC79BFF), label: "Thinking", icon: "sparkles", glow: 0.75, pulse: 1.1)
-        case .speaking:  return Look(color: Color(hex: 0xFF9AD0), label: "Replying", icon: "bubble.left.fill", glow: 0.7, pulse: 0.8)
+        case .asleep:    return Look(color: Color(hex: Palette.inkSoft), label: nil, icon: "eye.fill", border: 0, pulse: 0)
+        case .waking:    return Look(color: Color(hex: 0xFFD66B), label: "Waking up", icon: "sun.max.fill", border: 6, pulse: 1.6)
+        case .listening: return Look(color: Self.blue, label: "Listening · hold to ask", icon: "ear", border: 10, pulse: 0)
+        case .asking:    return Look(color: Self.blue, label: "I'm all ears", icon: "mic.fill", border: 16, pulse: 1.2)
+        case .thinking:  return Look(color: Color(hex: 0xC79BFF), label: "Thinking", icon: "sparkles", border: 8, pulse: 1.1)
+        case .speaking:  return Look(color: Color(hex: 0xFF9AD0), label: "Replying", icon: "bubble.left.fill", border: 8, pulse: 0)
         }
     }
 
+    /// The phone screen's own corner radius, so the border lines up with the glass.
+    private static let screenCornerRadius: CGFloat = {
+        #if canImport(UIKit)
+        if let radius = UIScreen.main.value(forKey: "_displayCornerRadius") as? CGFloat, radius > 0 { return radius }
+        #endif
+        return 55
+    }()
+
     var body: some View {
         let look = look
-        TimelineView(.animation) { context in
+        TimelineView(.animation(paused: look.pulse == 0)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             let wave = look.pulse > 0 ? 0.5 + 0.5 * sin(t * look.pulse * 2 * .pi) : 1
             ZStack(alignment: .topLeading) {
-                if look.glow > 0 {
-                    RoundedRectangle(cornerRadius: 46, style: .continuous)
-                        .strokeBorder(look.color, lineWidth: 10 + 8 * look.glow)
-                        .blur(radius: 16)
-                        .opacity(look.glow * (0.55 + 0.45 * wave))
-                    RoundedRectangle(cornerRadius: 46, style: .continuous)
-                        .strokeBorder(look.color.opacity(0.9), lineWidth: 2.5)
-                        .opacity(look.glow * (0.4 + 0.6 * wave))
+                if look.border > 0 {
+                    RoundedRectangle(cornerRadius: Self.screenCornerRadius, style: .continuous)
+                        .strokeBorder(look.color, lineWidth: look.border)
+                        .opacity(look.pulse > 0 ? 0.65 + 0.35 * wave : 1)
                 }
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(look.color)
-                        .frame(width: 9, height: 9)
-                        .opacity(look.pulse > 0 ? 0.45 + 0.55 * wave : 0.8)
+                HStack(spacing: 7) {
                     Image(systemName: look.icon)
                         .font(.system(size: 14, weight: .bold))
-                    Text(look.label)
-                        .font(.fredoka(16))
+                    if let label = look.label {
+                        Text(label).font(.fredoka(16))
+                    }
                 }
-                .foregroundStyle(look.color)
-                .padding(.horizontal, 14)
-                .frame(height: 34)
-                .background(Capsule().fill(look.color.opacity(state == .asleep ? 0.08 : 0.16)))
-                .overlay(Capsule().strokeBorder(look.color.opacity(state == .asleep ? 0.2 : 0.45), lineWidth: 1.5))
-                .opacity(state == .asleep ? 0.6 : 1)
-                .padding(.top, 14)
-                .padding(.leading, 22)
+                .foregroundStyle(look.label == nil ? look.color.opacity(0.7) : .white)
+                .padding(.horizontal, look.label == nil ? 0 : 14)
+                .frame(minWidth: 34, minHeight: 34)
+                .background(Capsule().fill(look.label == nil ? Color.white.opacity(0.06) : look.color))
+                .padding(.top, 14 + look.border)
+                .padding(.leading, 24 + look.border)
             }
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .animation(.easeInOut(duration: 0.3), value: state)
+        .animation(.easeInOut(duration: 0.25), value: state)
     }
 }
 

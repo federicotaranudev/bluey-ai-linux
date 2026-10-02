@@ -15,7 +15,7 @@ final class Settings {
     }
 
     var glow: Bool {
-        get { defaults.object(forKey: "glow") as? Bool ?? true }
+        get { defaults.object(forKey: "glow") as? Bool ?? false }
         set { defaults.set(newValue, forKey: "glow"); onChange?() }
     }
 

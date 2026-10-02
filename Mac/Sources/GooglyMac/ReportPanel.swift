@@ -166,8 +166,7 @@ private struct ReportCard: View {
                 .fill(LinearGradient(colors: [.white, Color(nsColor: NSColor(hex: 0xEEF0FF))], startPoint: .top, endPoint: .bottom))
         )
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(berry, lineWidth: 2.5))
-        .padding(10)  // room for the glow
-        .shadow(color: Color(nsColor: NSColor(hex: Palette.berry1)).opacity(0.5), radius: 14, y: 4)
+        .padding(4)
         .contentShape(Rectangle())
         .onTapGesture { if model.report != nil, !model.expanded { onToggle() } }
     }
