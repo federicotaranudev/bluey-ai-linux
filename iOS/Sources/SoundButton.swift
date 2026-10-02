@@ -69,6 +69,30 @@ struct SoundButton: View {
             .buttonStyle(.plain)
             .disabled(!link.connected)
             .opacity(link.connected ? 1 : 0.4)
+            if link.macs.count > 1 {
+                Text("Mac")
+                    .font(.plexMono(12))
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color(hex: Palette.inkSoft))
+                ForEach(link.macs, id: \.self) { name in
+                    Button {
+                        link.choose(name)
+                        lastTouch = Date()
+                    } label: {
+                        HStack {
+                            Text(name).font(.plexSans(14)).foregroundStyle(.white).lineLimit(1)
+                            Spacer()
+                            if name == link.currentMac {
+                                Image(systemName: link.connected ? "checkmark" : "ellipsis")
+                                    .foregroundStyle(Color(hex: Palette.berry2))
+                            }
+                        }
+                        .frame(minHeight: 36)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
             if !link.connected {
                 Text("Connect to your Mac to hear him.")
                     .font(.plexSans(12))
