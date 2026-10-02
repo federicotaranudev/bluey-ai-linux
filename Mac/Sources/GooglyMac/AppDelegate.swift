@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         overlay.onFace = { [weak self] face in self?.server.send(face) }
         overlay.start()
         showDemoBubbleIfAsked()
+        checkPermissions()
         if let question = ProcessInfo.processInfo.environment["GOOGLY_DEMO_RESEARCH"] {
             host.demoResearch(question, out: ProcessInfo.processInfo.environment["GOOGLY_DEMO_OUT"] ?? "/tmp/googly-report")
         }
@@ -117,6 +118,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func setPhonePosition(_ item: NSMenuItem) { settings.phonePosition = Double(item.tag) / 100 }
     @objc private func toggleAwake() {
         server.broadcast(Packet(command: host.awake ? "sleep" : "wake"))
+    }
+
+    /// On launch, asks for whatever he still needs (so Googly Eyes shows up in those Settings lists),
+    /// and keeps a small status file so it's easy to check what's allowed.
+    private func checkPermissions() {
+        guard ProcessInfo.processInfo.environment["GOOGLY_DEMO_OUT"] == nil else { return }
+        if settings.computerControl && !ComputerControl.isTrusted { ComputerControl.askForPermission() }
+        if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
+        let status = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Googly/status.txt")
+        Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+            let text = "accessibility=\(ComputerControl.isTrusted) screenRecording=\(CGPreflightScreenCaptureAccess()) computerControl=\(Settings.shared.computerControl)\n"
+            try? text.write(to: status, atomically: true, encoding: .utf8)
+        }.fire()
     }
 
     @objc private func stopActions() {
