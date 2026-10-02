@@ -18,13 +18,15 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var animator = FaceAnimator()
     @State private var showPairing = true
+    @State private var holdStart: DispatchWorkItem?
+    @State private var holdingToAsk = false
 
     var body: some View {
         ZStack {
             FaceView(animator: animator)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { live.toggle() }  // double tap: wake up / back to follow mode
-                .simultaneousGesture(lookAtFinger)
+                .simultaneousGesture(holdToAsk)
 
             SoundButton(link: link, live: live)
 
@@ -50,19 +52,32 @@ struct RootView: View {
         }
     }
 
-    /// Drag a finger to make him look at it, handy for testing without the Mac.
-    private var lookAtFinger: some Gesture {
+    /// Press and hold the screen to ask him something; let go and he answers.
+    private var holdToAsk: some Gesture {
         DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                #if canImport(UIKit)
-                let bounds = UIScreen.main.bounds.size
-                #else
-                let bounds = CGSize(width: 844, height: 390)
-                #endif
-                animator.touchGaze = CGPoint(x: (value.location.x / bounds.width) * 2 - 1,
-                                             y: (value.location.y / bounds.height) * 2 - 1.2)
+            .onChanged { _ in
+                guard holdStart == nil, !holdingToAsk else { return }
+                let work = DispatchWorkItem {
+                    holdingToAsk = true
+                    #if canImport(UIKit)
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    #endif
+                    live.beginAsk()
+                }
+                holdStart = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)  // a quick tap isn't a hold
             }
-            .onEnded { _ in animator.touchGaze = nil }
+            .onEnded { _ in
+                holdStart?.cancel()
+                holdStart = nil
+                if holdingToAsk {
+                    holdingToAsk = false
+                    #if canImport(UIKit)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    #endif
+                    live.endAsk()
+                }
+            }
     }
 
     /// Connects the live voice to the Mac: keys, tools, captions and wake/sleep.
@@ -88,12 +103,17 @@ struct RootView: View {
                 animator.awake = true
                 animator.localMood = .happy
             case .listening:
+                animator.awake = true
                 animator.localMood = nil
                 link.send(Packet(command: "awake"))
-                link.send(Packet(command: "quiet"))
+            case .asking:
+                animator.awake = true
+                animator.localMood = .listening  // all ears while you hold
+                link.send(Packet(command: "awake"))
+            case .thinking:
+                animator.localMood = .thinking
             case .speaking:
                 animator.localMood = .talking
-                link.send(Packet(command: "speaking"))
             }
         }
         link.onCommand = { [live] command in

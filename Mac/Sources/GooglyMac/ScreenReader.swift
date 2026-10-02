@@ -30,6 +30,20 @@ struct ScreenSnapshot {
         return nil
     }
 
+    /// What's under (or right next to) a point: the smallest word, line or control there.
+    func target(near point: CGPoint) -> Target? {
+        var candidates: [Target] = controls.map { Target(id: $0.id, text: $0.label.isEmpty ? $0.kind : $0.label, rect: $0.rect) }
+        for entry in lines { candidates.append(entry.line); candidates += entry.words }
+        if let hit = candidates.filter({ $0.rect.insetBy(dx: -6, dy: -6).contains(point) })
+            .min(by: { $0.rect.width * $0.rect.height < $1.rect.width * $1.rect.height }) {
+            return hit
+        }
+        func distance(_ r: CGRect) -> CGFloat {
+            hypot(max(r.minX - point.x, 0, point.x - r.maxX), max(r.minY - point.y, 0, point.y - r.maxY))
+        }
+        return candidates.filter { distance($0.rect) < 60 }.min { distance($0.rect) < distance($1.rect) }
+    }
+
     /// The list Claude picks from. Coordinates are on a 0–1000 grid so it can relate them to the image.
     var targetList: String {
         func grid(_ r: CGRect) -> String {

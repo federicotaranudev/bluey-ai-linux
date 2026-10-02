@@ -10,7 +10,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private lazy var host = RealtimeHost(overlay: overlay)
 
-    static let voices = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.registerBundled()
@@ -93,13 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ComputerControl.openAccessibilitySettings()
     }
 
-    @objc private func toggleCaptions() { settings.captions.toggle() }
-    @objc private func setVoice(_ item: NSMenuItem) {
-        if let voice = item.representedObject as? String { UserDefaults.standard.set(voice, forKey: "realtimeVoice") }
-        restartIfAwake()
-    }
-
-    /// Wakes him again so a new voice, personality or set of tools takes effect right away.
+    /// Wakes him again so a new personality or set of tools takes effect right away.
     private func restartIfAwake() {
         guard host.awake else { return }
         server.broadcast(Packet(command: "sleep"))
@@ -217,20 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(submenu("Phone Sits Under", phoneMenu))
 
-        let voiceMenu = NSMenu()
-        let current = UserDefaults.standard.string(forKey: "realtimeVoice") ?? "ballad"
-        for voice in Self.voices {
-            let v = item(voice.capitalized, #selector(setVoice(_:)))
-            v.representedObject = voice
-            v.state = current == voice ? .on : .off
-            voiceMenu.addItem(v)
-        }
-        menu.addItem(submenu("Voice", voiceMenu))
         menu.addItem(item("Personality…", #selector(editPersonality)))
         menu.addItem(item("OpenAI Key…", #selector(editKeys)))
-        let captions = item("Live Captions", #selector(toggleCaptions))
-        captions.state = settings.captions ? .on : .off
-        menu.addItem(captions)
         menu.addItem(.separator())
 
         let trailMenu = NSMenu()

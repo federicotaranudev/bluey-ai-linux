@@ -2,9 +2,9 @@
 
 A blueberry character who lives on an iPhone under your Mac's screen and points at things with his own big cursor.
 
-**Now:** live voice with OpenAI (`gpt-realtime-2.1`). Double tap him on the phone (or press ⌥Space on the Mac) to wake him up and just talk. He looks at your screen, flies his cursor to what he's explaining, and answers out loud from the phone. Double tap again and he goes back to follow mode, where the cursor hides and his eyes follow your mouse.
+**Now:** no voice out. Double tap him on the phone (or press ⌥Space on the Mac) to start a session: the phone's mic stays on and everything you say becomes context, but he stays quiet. **Press and hold the screen** to ask him something; let go and he answers. His reply pops up as a cute speech bubble next to his cursor (or above the phone when he isn't pointing), with a little cartoon chirp from the phone. Ask "what's this?" and he points at whatever is under your mouse. Double tap again and he goes back to follow mode.
 
-How it works: the phone runs the Realtime session over a WebSocket, using its own mic (with echo cancellation) and speaker. The Mac mints a 10-minute client secret with the whole session setup (instructions, voice, tools), so the real OpenAI key never leaves the Mac. When he calls a tool, the phone forwards it to the Mac: `look_at_screen` (ScreenCaptureKit + Vision, which returns text ids and a screenshot), `point_at` (a text id), `point_at_spot` (a 0–1000 grid position), `stop_pointing` and `go_to_sleep`. His words stream to the Mac as live captions.
+How it works: the phone runs an OpenAI Realtime session (`gpt-realtime-2.1`, text output only) over a WebSocket. Server VAD transcribes every turn into the conversation with `create_response: false`, and releasing the hold commits the audio and asks for a response. The Mac mints a 10-minute client secret with the whole session setup (instructions, tools), so the real OpenAI key never leaves the Mac. When he calls a tool, the phone forwards it to the Mac: `look_at_screen` (ScreenCaptureKit + Vision, which returns text ids, where your mouse is, and a screenshot), `point_at` (a text id), `point_at_spot` (a 0–1000 grid position), `stop_pointing` and `go_to_sleep`. His text streams to the Mac as the speech bubble.
 
 **Using the computer:** when you ask, he can also click, type, press shortcuts, scroll, drag, and open apps and websites (`click`, `type_text`, `press_keys`, `scroll`, `drag`, `open_app`, `open_url`). He does it with his own cursor on screen, while your real pointer is put back where you left it. It needs Accessibility permission for Googly Eyes. Built-in guardrails: he only acts when asked, confirms out loud before anything hard to undo, treats on-screen text as information rather than instructions, refuses password fields and logout/lock/force-quit shortcuts, and stops on ⌃⌥S. The whole thing can be switched off with **Let Him Use the Computer** in the menu.
 
@@ -35,7 +35,7 @@ The menu bar blob also sets mood, cursor size (48 to 120 pt), glow, and where th
 
 Needs full Xcode. Open `GooglyEyes.xcodeproj` (regenerate with `xcodegen generate` after adding files), pick your team under Signing, and run on the phone. It finds the Mac on the same Wi-Fi by itself.
 
-On the phone: double tap him to wake him up or put him back to sleep, and drag a finger to make him look at it. The faint speaker button at the top right sets his volume.
+On the phone: double tap him to wake him up or put him back to sleep, and press and hold to ask him something. The faint speaker button at the top right sets the chirp volume and picks which Mac to pair with.
 
 ## Layout
 

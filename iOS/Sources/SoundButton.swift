@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A tiny, quiet speaker button in the top-right corner. Tap it for the voice volume and a test line.
+/// A tiny, quiet speaker button in the top-right corner. Tap it for the chirp volume, a test hi, and which Mac to pair with.
 struct SoundButton: View {
     @ObservedObject var link: MacLink
     @ObservedObject var live: LiveVoice
@@ -45,7 +45,7 @@ struct SoundButton: View {
     private var panel: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Voice volume")
+                Text("Chirp volume")
                     .font(.plexMono(12))
                     .textCase(.uppercase)
                     .foregroundStyle(Color(hex: Palette.inkSoft))
@@ -94,7 +94,7 @@ struct SoundButton: View {
                 }
             }
             if !link.connected {
-                Text("Connect to your Mac to hear him.")
+                Text("Connect to your Mac to talk to him.")
                     .font(.plexSans(12))
                     .foregroundStyle(Color(hex: Palette.inkSoft))
             }

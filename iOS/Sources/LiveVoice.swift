@@ -1,11 +1,12 @@
 import AVFoundation
 import Foundation
 
-/// A live, two-way voice conversation with OpenAI's Realtime API, running on the phone:
-/// the phone's mic listens (with echo cancellation) and his voice comes out of the phone's speaker.
+/// A live session with OpenAI's Realtime API, running on the phone. Once he's awake the mic is on the whole
+/// time, so everything you say becomes context, but he stays quiet until you hold the screen and ask.
+/// He never talks out loud: replies are text (speech bubbles on the Mac) with a little cartoon chirp here.
 /// Tools (look at the screen, point) run on the Mac.
 final class LiveVoice: NSObject, ObservableObject {
-    enum State: Equatable { case asleep, waking, listening, speaking }
+    enum State: Equatable { case asleep, waking, listening, asking, thinking, speaking }
 
     @Published private(set) var state: State = .asleep
 
@@ -19,7 +20,7 @@ final class LiveVoice: NSObject, ObservableObject {
     var onCaption: ((String, _ done: Bool) -> Void)?
     var onStateChange: ((State) -> Void)?
 
-    /// Loudness of his voice right now, 0…1.
+    /// Loudness of his chirp right now, 0…1.
     private(set) var level: Double = 0
 
     var volume: Double {
@@ -42,10 +43,10 @@ final class LiveVoice: NSObject, ObservableObject {
     private var pendingBuffers = 0
     private var responseActive = false
     private var sleepAfterReply = false
-    // For cutting him off cleanly when you start talking over him.
-    private var currentItem: String?
-    private var itemSamples = 0
-    private var itemStarted: Date?
+    /// Holding the screen to ask. Released before the session was ready: ask as soon as it is.
+    private var holding = false
+    private var askWhenReady = false
+    private var chirpedThisResponse = false
 
     private func setState(_ new: State) {
         guard new != state else { return }
@@ -89,14 +90,44 @@ final class LiveVoice: NSObject, ObservableObject {
         pendingBuffers = 0
         responseActive = false
         sleepAfterReply = false
+        holding = false
+        askWhenReady = false
+        toolsRunning = 0
         level = 0
         setState(.asleep)
     }
 
-    /// Asks him to say something short out loud (for checking the volume).
+    /// Says a quick hi (for checking the chirp volume).
     func sayHi() {
         guard socket != nil else { wake(); return }
-        send(["type": "response.create", "response": ["instructions": "Say a quick, cheerful hi in under ten words so the user can check your volume."]])
+        send(["type": "response.create", "response": ["instructions": "Reply with a quick, cheerful hi in under eight words."]])
+    }
+
+    // MARK: Hold to ask
+
+    /// You pressed and held the screen: what you say now is the question.
+    func beginAsk() {
+        holding = true
+        onCaption?("", false)  // clears his last bubble
+        if state == .asleep { wake(); return }
+        guard socket != nil else { return }
+        if state == .listening || state == .speaking { setState(.asking) }
+    }
+
+    /// You let go: he answers (or does the thing) using everything he's heard as context.
+    func endAsk() {
+        guard holding else { return }
+        holding = false
+        guard socket != nil, state != .waking else { askWhenReady = true; return }
+        ask()
+    }
+
+    private func ask() {
+        askWhenReady = false
+        setState(.thinking)
+        // Close off what you just said (it may still be mid-sentence) and ask for a reply.
+        send(["type": "input_audio_buffer.commit"])
+        send(["type": "response.create"])
     }
 
     // MARK: Connection
@@ -115,8 +146,12 @@ final class LiveVoice: NSObject, ObservableObject {
             sleep()
             return
         }
-        setState(.listening)
-        send(["type": "response.create", "response": ["instructions": "You just woke up. Say a tiny, cheerful hello (a few words)."]])
+        chirp(syllables: 2)
+        if askWhenReady {
+            ask()
+        } else {
+            setState(holding ? .asking : .listening)
+        }
     }
 
     private func send(_ event: [String: Any]) {
@@ -154,27 +189,28 @@ final class LiveVoice: NSObject, ObservableObject {
         case "response.created":
             responseActive = true
             transcript = ""
+            chirpedThisResponse = false
 
-        case "response.output_audio.delta":
-            if let delta = event["delta"] as? String, let data = Data(base64Encoded: delta) {
-                play(data, item: event["item_id"] as? String)
-            }
-
-        case "response.output_audio_transcript.delta":
+        case "response.output_text.delta", "response.output_audio_transcript.delta":
             if let delta = event["delta"] as? String {
                 transcript += delta
+                if !chirpedThisResponse, !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    chirpedThisResponse = true
+                    setState(.speaking)
+                    chirp(syllables: min(max(transcript.split(separator: " ").count, 3), 5))
+                }
                 onCaption?(transcript, false)
             }
-
-        case "input_audio_buffer.speech_started":
-            interrupt()
 
         case "response.done":
             responseActive = false
             if !transcript.isEmpty { onCaption?(transcript, true) }
             let output = (event["response"] as? [String: Any])?["output"] as? [[String: Any]] ?? []
             let calls = output.filter { $0["type"] as? String == "function_call" }
-            if !calls.isEmpty { runTools(calls) }
+            if !calls.isEmpty {
+                if state != .speaking { setState(.thinking) }
+                runTools(calls)
+            }
             finishIfQuiet()
 
         case "error":
@@ -188,6 +224,7 @@ final class LiveVoice: NSObject, ObservableObject {
 
     private func runTools(_ calls: [[String: Any]]) {
         var remaining = calls.count
+        toolsRunning += 1
         var images: [String] = []
         for call in calls {
             let name = call["name"] as? String ?? ""
@@ -202,6 +239,7 @@ final class LiveVoice: NSObject, ObservableObject {
                     if let image { images.append(image) }
                     remaining -= 1
                     if remaining == 0 {
+                        self.toolsRunning = max(0, self.toolsRunning - 1)
                         // Screenshots go in as a user image so he can actually see the screen.
                         for image in images {
                             self.send(["type": "conversation.item.create",
@@ -216,11 +254,13 @@ final class LiveVoice: NSObject, ObservableObject {
         }
     }
 
-    /// Back to listening once he's finished talking (or asleep, if he said goodbye).
+    private var toolsRunning = 0
+
+    /// Back to listening once he's replied and chirped (or asleep, if he said goodbye).
     private func finishIfQuiet() {
-        guard pendingBuffers == 0, !responseActive else { return }
+        guard pendingBuffers == 0, !responseActive, toolsRunning == 0 else { return }
         if sleepAfterReply { sleep(); return }
-        if state == .speaking { setState(.listening) }
+        if state == .speaking || state == .thinking { setState(holding ? .asking : .listening) }
     }
 
     // MARK: Audio
@@ -288,24 +328,33 @@ final class LiveVoice: NSObject, ObservableObject {
         }
     }
 
-    private func play(_ pcm: Data, item: String?) {
-        let frames = pcm.count / 2
-        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(frames)),
+    /// A tiny cartoon "bwee-bi-bip": a few quick rising blips, like a little creature chattering.
+    private func chirp(syllables: Int) {
+        guard audioReady else { return }
+        let rate = playFormat.sampleRate
+        var samples: [Float] = []
+        let base = Double.random(in: 820...1000)
+        for i in 0..<syllables {
+            let duration = i == 0 ? 0.085 : Double.random(in: 0.05...0.075)
+            let count = Int(duration * rate)
+            let start = base * (i == 0 ? 0.72 : Double.random(in: 0.88...1.3))
+            let end = start * (i == syllables - 1 ? 1.55 : Double.random(in: 1.12...1.35))
+            var phase = 0.0
+            for n in 0..<count {
+                let t = Double(n) / Double(count)
+                let frequency = start + (end - start) * t * t
+                phase += 2 * .pi * frequency / rate
+                let envelope = min(1, t * 14) * pow(1 - t, 1.8)
+                let wave = sin(phase) + 0.22 * sin(2 * phase) + 0.06 * sin(3 * phase)
+                samples.append(Float(wave * envelope * 0.3))
+            }
+            samples += [Float](repeating: 0, count: Int(rate * Double.random(in: 0.018...0.035)))
+        }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(samples.count)),
               let out = buffer.floatChannelData?[0] else { return }
-        buffer.frameLength = AVAudioFrameCount(frames)
-        pcm.withUnsafeBytes { raw in
-            let ints = raw.bindMemory(to: Int16.self)
-            for i in 0..<frames { out[i] = Float(Int16(littleEndian: ints[i])) / 32768 }
-        }
-        if item != currentItem {
-            currentItem = item
-            itemSamples = 0
-            itemStarted = nil
-        }
-        if itemStarted == nil { itemStarted = Date() }
-        itemSamples += frames
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { out.update(from: $0.baseAddress!, count: samples.count) }
         pendingBuffers += 1
-        setState(.speaking)
         player.scheduleBuffer(buffer) { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -314,20 +363,5 @@ final class LiveVoice: NSObject, ObservableObject {
                 self.finishIfQuiet()
             }
         }
-    }
-
-    /// You started talking over him: stop his audio and tell the server how much you actually heard.
-    private func interrupt() {
-        guard pendingBuffers > 0 else { return }
-        if let item = currentItem, let started = itemStarted {
-            let heardMs = min(Double(itemSamples) / 24, Date().timeIntervalSince(started) * 1000)
-            send(["type": "conversation.item.truncate", "item_id": item, "content_index": 0, "audio_end_ms": Int(heardMs)])
-        }
-        player.stop()
-        player.play()
-        pendingBuffers = 0
-        level = 0
-        currentItem = nil
-        setState(.listening)
     }
 }
