@@ -15,6 +15,8 @@ struct GooglyApp: App {
 struct RootView: View {
     @StateObject private var link = MacLink()
     @StateObject private var live = LiveVoice()
+    @StateObject private var store = SessionStore()
+    @State private var showApp = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var animator = FaceAnimator()
     @State private var showPairing = true
@@ -32,6 +34,20 @@ struct RootView: View {
 
             SoundButton(link: link, live: live)
 
+            // Bluey's app: sessions, transcripts and settings.
+            Button { showApp = true } label: {
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.white.opacity(0.06)).frame(width: 34, height: 34))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open Bluey")
+            .padding(.top, 10)
+            .padding(.trailing, 62)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
             if showPairing && !link.connected {
                 PairingView { withAnimation(.easeOut(duration: 0.3)) { showPairing = false } }
                     .transition(.opacity)
@@ -40,6 +56,9 @@ struct RootView: View {
         .background(Color.black)
         .ignoresSafeArea()
         .phoneChrome()
+        .fullScreenCover(isPresented: $showApp) {
+            BlueyAppView(store: store, live: live, link: link) { showApp = false }
+        }
         .onAppear {
             link.onFace = { [animator] face in animator.receive(face, at: Date().timeIntervalSinceReferenceDate) }
             animator.localTalk = { [live] in live.level }
@@ -92,6 +111,11 @@ struct RootView: View {
                 done(reply?.text ?? "The Mac didn't answer.", reply?.image)
             }
         }
+        live.onSessionStart = { [store] in store.start() }
+        live.onSessionEnd = { [store] in store.end() }
+        live.onUserTurn = { [store] item, asked in store.placeholder(itemID: item, asked: asked) }
+        live.onUserWords = { [store] item, text, asked in store.heard(itemID: item, text: text, asked: asked) }
+        live.onReply = { [store] text in store.reply(text) }
         live.onCaption = { [link] text, finished in
             link.send(Packet(command: finished ? "captionDone" : "caption", text: text))
         }

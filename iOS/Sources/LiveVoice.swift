@@ -19,6 +19,12 @@ final class LiveVoice: NSObject, ObservableObject {
     /// What he's saying, as it streams in. `done` is true when the reply finished.
     var onCaption: ((String, _ done: Bool) -> Void)?
     var onStateChange: ((State) -> Void)?
+    /// For the saved transcript: a session started or ended, something you said (in order, then its words), his replies.
+    var onSessionStart: (() -> Void)?
+    var onSessionEnd: (() -> Void)?
+    var onUserTurn: ((_ itemID: String, _ asked: Bool) -> Void)?
+    var onUserWords: ((_ itemID: String, _ text: String, _ asked: Bool) -> Void)?
+    var onReply: ((String) -> Void)?
 
     /// Loudness of his chirp right now, 0…1.
     private(set) var level: Double = 0
@@ -47,6 +53,9 @@ final class LiveVoice: NSObject, ObservableObject {
     private var holding = false
     private var askWhenReady = false
     private var chirpedThisResponse = false
+    /// Turns that were questions (said while holding, or committed when you let go).
+    private var askedItems: Set<String> = []
+    private var awaitingQuestion = false
 
     private func setState(_ new: State) {
         guard new != state else { return }
@@ -83,6 +92,9 @@ final class LiveVoice: NSObject, ObservableObject {
     }
 
     func sleep() {
+        if socket != nil { onSessionEnd?() }
+        askedItems = []
+        awaitingQuestion = false
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
         stopAudio()
@@ -125,6 +137,7 @@ final class LiveVoice: NSObject, ObservableObject {
     private func ask() {
         askWhenReady = false
         setState(.thinking)
+        awaitingQuestion = true
         // Close off what you just said (it may still be mid-sentence) and ask for a reply.
         send(["type": "input_audio_buffer.commit"])
         send(["type": "response.create"])
@@ -146,6 +159,7 @@ final class LiveVoice: NSObject, ObservableObject {
             sleep()
             return
         }
+        onSessionStart?()
         chirp(syllables: 2)
         if askWhenReady {
             ask()
@@ -202,9 +216,25 @@ final class LiveVoice: NSObject, ObservableObject {
                 onCaption?(transcript, false)
             }
 
+        case "input_audio_buffer.committed":
+            if let item = event["item_id"] as? String {
+                let asked = holding || awaitingQuestion
+                if asked { askedItems.insert(item) }
+                if awaitingQuestion, !holding { awaitingQuestion = false }
+                onUserTurn?(item, asked)
+            }
+
+        case "conversation.item.input_audio_transcription.completed":
+            if let item = event["item_id"] as? String, let text = event["transcript"] as? String {
+                onUserWords?(item, text, askedItems.contains(item))
+            }
+
         case "response.done":
             responseActive = false
-            if !transcript.isEmpty { onCaption?(transcript, true) }
+            if !transcript.isEmpty {
+                onCaption?(transcript, true)
+                onReply?(transcript)
+            }
             let output = (event["response"] as? [String: Any])?["output"] as? [[String: Any]] ?? []
             let calls = output.filter { $0["type"] as? String == "function_call" }
             if !calls.isEmpty {
@@ -214,7 +244,9 @@ final class LiveVoice: NSObject, ObservableObject {
             finishIfQuiet()
 
         case "error":
-            let message = ((event["error"] as? [String: Any])?["message"] as? String) ?? "Something went wrong."
+            let error = event["error"] as? [String: Any]
+            if (error?["code"] as? String) == "input_audio_buffer_commit_empty" { awaitingQuestion = false }
+            let message = (error?["message"] as? String) ?? "Something went wrong."
             NSLog("Googly realtime error: \(message)")
 
         default:
