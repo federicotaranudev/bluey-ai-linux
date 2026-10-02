@@ -107,7 +107,8 @@ final class FaceAnimator {
         }
         if mood == .thinking { want = CGPoint(x: 0.6 + 0.08 * sin(now * 1.3), y: -0.85) }
         if now > nextJitter {
-            let amount = !awake ? 0.015 : (mood == .talking || mood == .listening ? 0.09 : 0.06)
+            // While he's listening his eyes stay on your mouse; the livelier darting is for replying.
+            let amount = !awake ? 0.015 : (mood == .talking ? 0.07 : mood == .thinking ? 0.05 : 0.02)
             jitter = CGPoint(x: .random(in: -amount...amount), y: .random(in: -amount...amount))
             nextJitter = now + .random(in: 0.5...1.4)
         }

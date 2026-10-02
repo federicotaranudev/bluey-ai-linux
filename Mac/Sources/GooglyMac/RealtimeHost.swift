@@ -54,7 +54,7 @@ final class RealtimeHost {
             let text = packet.text ?? ""
             if !text.isEmpty { showCaption(text, for: 0) }
             let words = Double(text.split(separator: " ").count)
-            let readTime = min(max(2.8, 1.2 + words * 0.32), 12)
+            let readTime = min(max(2.8, 1.2 + words * 0.32), 12) + 3
             readingDone?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 self?.setSpeaking(false)
@@ -78,11 +78,12 @@ final class RealtimeHost {
         awake = on
         engine.awake = on
         engine.brainMood = nil
-        engine.gazeOverride = on ? CGPoint(x: 0, y: 0.15) : nil  // looks at you while awake
+        engine.gazeOverride = nil  // his eyes follow your mouse while he listens
         if !on {
             queue = []
             stopChoreography()
             overlay.goHome()
+            overlay.view.speechTarget = nil
             showCaption(nil, for: 0)
         }
         onChange?()
@@ -174,11 +175,12 @@ final class RealtimeHost {
             let id = (args["target_id"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard let snapshot else { return ("Call look_at_screen first.", nil) }
             guard let target = snapshot.target(id) else { return ("No target \(id). Use an id from the last look_at_screen.", nil) }
-            point(to: CGPoint(x: target.rect.midX, y: target.rect.maxY + 3))
+            point(to: CGPoint(x: target.rect.midX, y: target.rect.maxY + 3), showing: target.rect)
             return (queue.count > 1 ? "Queued: your cursor will point at \"\(target.text)\" after the earlier spots." : "Pointing at \"\(target.text)\".", nil)
         case "point_at_spot":
             guard let x = number(args["x"]), let y = number(args["y"]) else { return ("Give x and y.", nil) }
-            point(to: gridPoint(x, y))
+            let spot = gridPoint(x, y)
+            point(to: spot, showing: CGRect(x: spot.x - 16, y: spot.y - 16, width: 32, height: 32))
             return ("Pointing there.", nil)
         case "stop_pointing":
             requestHome()
@@ -395,6 +397,7 @@ final class RealtimeHost {
         holdUntil = 0
         homeRequested = false
         engine.gazeOverride = nil
+        overlay.view.speechTarget = nil
     }
 
     private func afterAction() {
@@ -417,7 +420,8 @@ final class RealtimeHost {
     // He often asks to point at several things at once. Each spot gets its own flight and a hold long
     // enough to talk about it, and the cursor only goes home once he's finished talking.
 
-    private var queue: [CGPoint] = []
+    /// Spots to point at, with the thing being shown (so his speech bubble can sit above it, not on it).
+    private var queue: [(point: CGPoint, thing: CGRect)] = []
     private var holdUntil = 0.0
     private var homeRequested = false
     private var speaking = false
@@ -429,8 +433,8 @@ final class RealtimeHost {
     /// Out and about with nothing more to say: go home after this much quiet.
     private static let idleHome = 5.0
 
-    private func point(to spot: CGPoint) {
-        queue.append(spot)
+    private func point(to spot: CGPoint, showing thing: CGRect) {
+        queue.append((spot, thing))
         homeRequested = false
         startChoreography()
     }
@@ -451,7 +455,8 @@ final class RealtimeHost {
     private func choreograph() {
         let now = CACurrentMediaTime()
         if now >= holdUntil, !queue.isEmpty {
-            let spot = queue.removeFirst()
+            let (spot, thing) = queue.removeFirst()
+            overlay.view.speechTarget = thing
             if !speaking { quietSince = now }  // give him time to start talking about it
             engine.gazeOverride = nil  // his eyes follow the cursor while pointing
             overlay.mode = .pinned(spot)
@@ -470,7 +475,8 @@ final class RealtimeHost {
 
     private func goHome() {
         overlay.goHome()
-        engine.gazeOverride = awake ? CGPoint(x: 0, y: 0.15) : nil
+        engine.gazeOverride = nil
+        overlay.view.speechTarget = nil
         homeRequested = false
         stopChoreography()
     }

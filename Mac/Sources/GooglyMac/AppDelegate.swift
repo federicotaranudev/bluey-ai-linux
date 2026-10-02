@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         overlay.onFace = { [weak self] face in self?.server.send(face) }
         overlay.start()
+        showDemoBubbleIfAsked()
         server.onPhonesChanged = { [weak self] names in
             self?.refreshIcon()
             if names.isEmpty, self?.host.awake == true { self?.host.setAwake(false) }
@@ -64,6 +65,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func dock() { overlay.goHome() }
+
+    /// For checking the speech bubble's look: GOOGLY_DEMO_BUBBLE=top|middle|home shows a sample reply.
+    private func showDemoBubbleIfAsked() {
+        guard let where_ = ProcessInfo.processInfo.environment["GOOGLY_DEMO_BUBBLE"],
+              let size = NSScreen.screens.first?.frame.size else { return }
+        let y: CGFloat = where_ == "top" ? 40 : size.height * 0.55
+        let thing = CGRect(x: size.width * 0.3, y: y, width: 90, height: 22)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if where_ != "home" {
+                self.overlay.mode = .pinned(CGPoint(x: thing.midX, y: thing.maxY + 3))
+                self.overlay.view.speechTarget = thing
+            }
+            self.overlay.view.caption = ProcessInfo.processInfo.environment["GOOGLY_DEMO_TEXT"]
+                ?? "That's the prompt box, where you type to Claude. Cheeky little thing."
+        }
+        // GOOGLY_DEMO_OUT=path.png saves a picture of the overlay (on dark grey) and quits.
+        if let out = ProcessInfo.processInfo.environment["GOOGLY_DEMO_OUT"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                let view = self.overlay.view
+                let scale: CGFloat = 1
+                let w = Int(view.bounds.width * scale), h = Int(view.bounds.height * scale)
+                guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { exit(1) }
+                ctx.setFillColor(NSColor(white: 0.12, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+                ctx.setFillColor(NSColor(white: 0.5, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: thing.minX, y: view.bounds.height - thing.maxY, width: thing.width, height: thing.height))
+                ctx.scaleBy(x: scale, y: scale)
+                view.layer?.presentation()?.render(in: ctx) ?? view.layer?.render(in: ctx)
+                if let image = ctx.makeImage() {
+                    let rep = NSBitmapImageRep(cgImage: image)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+                }
+                exit(0)
+            }
+        }
+    }
     @objc private func toggleShow() { settings.showCursor.toggle() }
     @objc private func toggleGlow() { settings.glow.toggle() }
     @objc private func setTrail(_ item: NSMenuItem) {

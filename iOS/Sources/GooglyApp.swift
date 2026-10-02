@@ -28,6 +28,8 @@ struct RootView: View {
                 .onTapGesture(count: 2) { live.toggle() }  // double tap: wake up / back to follow mode
                 .simultaneousGesture(holdToAsk)
 
+            ModeIndicator(state: live.state)
+
             SoundButton(link: link, live: live)
 
             if showPairing && !link.connected {
@@ -123,6 +125,70 @@ struct RootView: View {
             default: break
             }
         }
+    }
+}
+
+/// Shows which mode he's in: a colored glow around the screen edge plus a little label in the corner.
+struct ModeIndicator: View {
+    let state: LiveVoice.State
+
+    private struct Look {
+        let color: Color
+        let label: String
+        let icon: String
+        let glow: Double      // how strong the edge glow is, 0 = none
+        let pulse: Double     // pulses per second
+    }
+
+    private var look: Look {
+        switch state {
+        case .asleep:    return Look(color: Color(hex: Palette.inkSoft), label: "Following your mouse", icon: "eye", glow: 0, pulse: 0)
+        case .waking:    return Look(color: Color(hex: 0xFFD66B), label: "Waking up", icon: "sun.max.fill", glow: 0.55, pulse: 1.6)
+        case .listening: return Look(color: Color(hex: 0x5BE49B), label: "Listening · hold to ask", icon: "ear", glow: 0.45, pulse: 0.5)
+        case .asking:    return Look(color: Color(hex: Palette.berry1), label: "I'm all ears", icon: "mic.fill", glow: 1, pulse: 1.4)
+        case .thinking:  return Look(color: Color(hex: 0xC79BFF), label: "Thinking", icon: "sparkles", glow: 0.75, pulse: 1.1)
+        case .speaking:  return Look(color: Color(hex: 0xFF9AD0), label: "Replying", icon: "bubble.left.fill", glow: 0.7, pulse: 0.8)
+        }
+    }
+
+    var body: some View {
+        let look = look
+        TimelineView(.animation) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let wave = look.pulse > 0 ? 0.5 + 0.5 * sin(t * look.pulse * 2 * .pi) : 1
+            ZStack(alignment: .topLeading) {
+                if look.glow > 0 {
+                    RoundedRectangle(cornerRadius: 46, style: .continuous)
+                        .strokeBorder(look.color, lineWidth: 10 + 8 * look.glow)
+                        .blur(radius: 16)
+                        .opacity(look.glow * (0.55 + 0.45 * wave))
+                    RoundedRectangle(cornerRadius: 46, style: .continuous)
+                        .strokeBorder(look.color.opacity(0.9), lineWidth: 2.5)
+                        .opacity(look.glow * (0.4 + 0.6 * wave))
+                }
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(look.color)
+                        .frame(width: 9, height: 9)
+                        .opacity(look.pulse > 0 ? 0.45 + 0.55 * wave : 0.8)
+                    Image(systemName: look.icon)
+                        .font(.system(size: 14, weight: .bold))
+                    Text(look.label)
+                        .font(.fredoka(16))
+                }
+                .foregroundStyle(look.color)
+                .padding(.horizontal, 14)
+                .frame(height: 34)
+                .background(Capsule().fill(look.color.opacity(state == .asleep ? 0.08 : 0.16)))
+                .overlay(Capsule().strokeBorder(look.color.opacity(state == .asleep ? 0.2 : 0.45), lineWidth: 1.5))
+                .opacity(state == .asleep ? 0.6 : 1)
+                .padding(.top, 14)
+                .padding(.leading, 22)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.3), value: state)
     }
 }
 

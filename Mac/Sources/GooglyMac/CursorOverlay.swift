@@ -469,6 +469,9 @@ final class CursorView: NSView {
     private let bubbles = CALayer()
     /// His speech bubble: a little cloud with a tail that points at his cursor (or down at the phone).
     private let speech = CAShapeLayer()
+    private let speechFill = CAGradientLayer()
+    private let speechFillMask = CAShapeLayer()
+    private let speechBorder = CAShapeLayer()
     private let speechText = CATextLayer()
     private var speechSize = CGSize.zero
     private var speechBorn = 0.0
@@ -481,6 +484,9 @@ final class CursorView: NSView {
     private var stringMid: CGPoint?
     private var stringMidVelocity = CGVector.zero
     private var activeBubbles: [(layer: CALayer, born: Double, life: Double)] = []
+
+    /// The thing he's pointing at (overlay coordinates), so his bubble sits above it instead of covering it.
+    var speechTarget: CGRect?
 
     /// What he's saying, shown in his speech bubble.
     var caption: String? {
@@ -514,18 +520,24 @@ final class CursorView: NSView {
             eyes.append((socket, white, pupil))
         }
 
+        // A soft white cloud with a faint blueberry tint at the bottom, a berry outline and a floaty glow.
         speech.fillColor = NSColor.white.cgColor
-        speech.strokeColor = NSColor(hex: Palette.berry2, alpha: 1).cgColor
-        speech.lineWidth = 3
-        speech.lineJoin = .round
         speech.shadowColor = NSColor(hex: Palette.berry1).cgColor
-        speech.shadowOpacity = 0.35
-        speech.shadowRadius = 14
-        speech.shadowOffset = CGSize(width: 0, height: -4)
+        speech.shadowOpacity = 0.45
+        speech.shadowRadius = 18
+        speech.shadowOffset = CGSize(width: 0, height: -6)
         speech.opacity = 0
+        speechFill.colors = [NSColor.white.cgColor, NSColor(hex: 0xEEF0FF).cgColor]
+        speechFill.startPoint = CGPoint(x: 0.5, y: 1)
+        speechFill.endPoint = CGPoint(x: 0.5, y: 0)
+        speechFill.mask = speechFillMask
+        speechBorder.fillColor = nil
+        speechBorder.strokeColor = NSColor(hex: Palette.berry2, alpha: 1).cgColor
+        speechBorder.lineWidth = 2.5
+        speechBorder.lineJoin = .round
         speechText.isWrapped = true
         speechText.alignmentMode = .center
-        speech.addSublayer(speechText)
+        for l in [speechFill, speechBorder, speechText] { speech.addSublayer(l) as Void }
 
         engine.onLand = { [weak self] point in self?.softLand(at: point) }
         engine.onLaunch = { [weak self] point in self?.puff(at: point) }
@@ -551,7 +563,7 @@ final class CursorView: NSView {
     /// Pixel density for crisp drawing (also used by the preview renderer).
     func setScale(_ newScale: CGFloat) {
         scale = newScale
-        for l in [root, stringLayer, trailLayer, cursor, body, speech, speechText] { l.contentsScale = scale }
+        for l in [root, stringLayer, trailLayer, cursor, body, speech, speechFill, speechFillMask, speechBorder, speechText] { l.contentsScale = scale }
         for eye in eyes { [eye.white, eye.pupil].forEach { $0.contentsScale = scale } }
         builtArt = nil
     }
@@ -879,34 +891,46 @@ final class CursorView: NSView {
 
     // MARK: Speech bubble
 
-    private static let speechPad = CGSize(width: 22, height: 14)
+    private static let speechPad = CGSize(width: 24, height: 15)
+    private static let tailLength: CGFloat = 18
 
     private func layoutCaption() {
         guard let caption, !caption.isEmpty, bounds.width > 0 else {
             if speech.opacity > 0 {
+                // Shrink away with a little pop.
                 let fade = CABasicAnimation(keyPath: "opacity")
                 fade.fromValue = speech.presentation()?.opacity ?? 1
                 fade.toValue = 0
-                fade.duration = 0.25
-                speech.add(fade, forKey: "fade")
+                let shrink = CABasicAnimation(keyPath: "transform.scale")
+                shrink.fromValue = 1
+                shrink.toValue = 0.85
+                let group = CAAnimationGroup()
+                group.animations = [fade, shrink]
+                group.duration = 0.22
+                group.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                speech.add(group, forKey: "fade")
                 speech.opacity = 0
             }
             speechSize = .zero
             return
         }
+        // Longer replies get a slightly smaller font and a wider bubble, so it never turns into a tower.
+        let length = caption.count
+        let fontSize: CGFloat = length <= 50 ? 21 : length <= 110 ? 19 : 17
         let style = NSMutableParagraphStyle()
         style.alignment = .center
-        style.lineSpacing = 2
+        style.lineSpacing = 1.5
         let text = NSAttributedString(string: caption, attributes: [
-            .font: Fonts.display(24),
+            .font: Fonts.display(fontSize),
             .foregroundColor: NSColor(hex: Palette.ink),
             .paragraphStyle: style,
         ])
-        let maxWidth = min(bounds.width * 0.4, 440)
-        let size = text.boundingRect(with: CGSize(width: maxWidth, height: 600),
+        // Aim for a cosy, balanced shape (a couple of lines) rather than one long strip.
+        let maxWidth = min(bounds.width * 0.5, 580, max(240, sqrt(Double(length)) * 50))
+        let size = text.boundingRect(with: CGSize(width: maxWidth, height: 800),
                                      options: [.usesLineFragmentOrigin, .usesFontLeading]).size
         let pad = Self.speechPad
-        let newSize = CGSize(width: max(ceil(size.width) + pad.width * 2, 64), height: ceil(size.height) + pad.height * 2)
+        let newSize = CGSize(width: max(ceil(size.width) + pad.width * 2, 70), height: ceil(size.height) + pad.height * 2)
         let appearing = speechSize == .zero || speech.opacity == 0
         speechSize = newSize
         CATransaction.begin()
@@ -918,70 +942,79 @@ final class CursorView: NSView {
             speech.removeAnimation(forKey: "fade")
             speech.opacity = 1
             let pop = CASpringAnimation(keyPath: "transform.scale")
-            pop.fromValue = 0.3
+            pop.fromValue = 0.55
             pop.toValue = 1
-            pop.damping = 10
-            pop.initialVelocity = 8
+            pop.damping = 12
+            pop.stiffness = 260
+            pop.initialVelocity = 4
             pop.duration = pop.settlingDuration
+            let fadeIn = CABasicAnimation(keyPath: "opacity")
+            fadeIn.fromValue = 0
+            fadeIn.toValue = 1
+            fadeIn.duration = 0.12
             speech.add(pop, forKey: "pop")
+            speech.add(fadeIn, forKey: "fadeIn")
         }
     }
 
-    /// Follows his cursor every frame: beside it while he points, otherwise just above the phone.
+    /// Follows his cursor every frame: above the thing he's pointing at (or below his cursor when there's
+    /// no room up there), otherwise just above the phone.
     private func renderSpeech(now: Double) {
         guard speechSize != .zero else { return }
         let size = speechSize
-        let gap: CGFloat = 20
+        let tail = Self.tailLength
         let margin: CGFloat = 14
         let pointing = engine.opacity > 0.1 && !engine.isHome
-        var target: CGPoint
-        var origin: CGPoint  // top-left, y down
+        var target: CGPoint  // where the tail points, y down
+        var origin: CGPoint  // bubble top-left, y down
         var tailUp = false
+        // Below the cursor (which hangs down-right from its tip), for when there's no room above.
+        let belowCursor = CGPoint(x: engine.tip.x + engine.size * 0.5, y: engine.tip.y + engine.size * 1.35)
         if pointing {
-            // Up and to the right of the tip, so the cursor (which hangs down-right) stays clear.
-            target = CGPoint(x: engine.tip.x + engine.size * 0.15, y: engine.tip.y - 6)
-            origin = CGPoint(x: target.x - 34, y: target.y - gap - size.height)
-            if origin.x + size.width > bounds.width - margin { origin.x = target.x - size.width + 34 }
+            let thing = speechTarget ?? CGRect(x: engine.tip.x - 12, y: engine.tip.y - 30, width: 24, height: 24)
+            target = CGPoint(x: thing.midX, y: thing.minY - 10)
+            origin = CGPoint(x: target.x - size.width / 2, y: target.y - tail - size.height)
             if origin.y < margin {
-                target = CGPoint(x: engine.tip.x + engine.size * 0.5, y: engine.tip.y + engine.size * 1.1)
-                origin.y = target.y + gap
+                target = belowCursor
+                origin = CGPoint(x: target.x - size.width / 2, y: target.y + tail)
                 tailUp = true
             }
         } else {
             target = CGPoint(x: bounds.width * Settings.shared.phonePosition, y: bounds.height - engine.size * 0.9)
-            origin = CGPoint(x: target.x - size.width / 2, y: target.y - gap - size.height)
+            origin = CGPoint(x: target.x - size.width / 2, y: target.y - tail - size.height)
         }
         origin.x = min(max(origin.x, margin), bounds.width - size.width - margin)
         origin.y = min(max(origin.y, margin), bounds.height - size.height - margin)
-        origin.y += CGFloat(sin((now - speechBorn) * 2.4)) * 2.5  // a gentle float
+        let float = CGFloat(sin((now - speechBorn) * 2.2)) * 2  // a gentle bob
+        origin.y += float
+        target.y += float * 0.5
 
         // Layer space is y-up.
         let frame = CGRect(x: origin.x, y: bounds.height - origin.y - size.height, width: size.width, height: size.height)
         speech.bounds = CGRect(origin: .zero, size: size)
         speech.position = CGPoint(x: frame.midX, y: frame.midY)
+        speechFill.frame = speech.bounds
+        speechBorder.frame = speech.bounds
+        speechFillMask.frame = speech.bounds
         speechText.frame = speech.bounds.insetBy(dx: Self.speechPad.width, dy: Self.speechPad.height - 1)
 
-        // Tail from the bubble's edge toward the target.
-        let tipLocal = CGPoint(x: target.x - origin.x, y: (origin.y + size.height) - target.y)
-        let edgeY: CGFloat = tailUp ? size.height : 0
-        let radius = min(22, size.height / 2)
-        let baseX = min(max(tipLocal.x, radius + 12), size.width - radius - 12)
-        let reach = gap - 4
-        var dir = CGPoint(x: tipLocal.x - baseX, y: tipLocal.y - edgeY)
-        let length = max(hypot(dir.x, dir.y), 0.001)
-        dir = CGPoint(x: dir.x / length * min(length, reach + 6), y: dir.y / length * min(length, reach + 6))
-        let tailTip = CGPoint(x: baseX + dir.x, y: edgeY + (tailUp ? max(dir.y, reach) : min(dir.y, -reach)))
+        // The tail starts on the bottom (or top) edge, as close under the target as the corners allow,
+        // and leans toward it.
+        let w = size.width, h = size.height
+        let r = min(24, h / 2)
+        let half: CGFloat = 13
+        let localX = target.x - origin.x
+        let baseX = min(max(localX, r + half + 2), w - r - half - 2)
+        let lean = min(max(localX - baseX, -tail * 1.4), tail * 1.4)
+        let tipY: CGFloat = tailUp ? h + tail : -tail
+        let tip = CGPoint(x: baseX + lean, y: tipY)
 
         let path = CGMutablePath()
-        let r = radius
-        let w = size.width, h = size.height
-        let half: CGFloat = 11
-        // One outline: rounded box with the tail cut into the bottom (or top) edge.
         path.move(to: CGPoint(x: r, y: 0))
         if !tailUp {
             path.addLine(to: CGPoint(x: baseX - half, y: 0))
-            path.addQuadCurve(to: tailTip, control: CGPoint(x: baseX - half * 0.2, y: tailTip.y * 0.35))
-            path.addQuadCurve(to: CGPoint(x: baseX + half, y: 0), control: CGPoint(x: baseX + half * 0.5, y: tailTip.y * 0.25))
+            path.addCurve(to: tip, control1: CGPoint(x: baseX - half * 0.3, y: 0), control2: CGPoint(x: tip.x - 1, y: tipY * 0.5))
+            path.addCurve(to: CGPoint(x: baseX + half, y: 0), control1: CGPoint(x: tip.x + 2, y: tipY * 0.45), control2: CGPoint(x: baseX + half * 0.4, y: 0))
         }
         path.addLine(to: CGPoint(x: w - r, y: 0))
         path.addArc(tangent1End: CGPoint(x: w, y: 0), tangent2End: CGPoint(x: w, y: r), radius: r)
@@ -989,8 +1022,8 @@ final class CursorView: NSView {
         path.addArc(tangent1End: CGPoint(x: w, y: h), tangent2End: CGPoint(x: w - r, y: h), radius: r)
         if tailUp {
             path.addLine(to: CGPoint(x: baseX + half, y: h))
-            path.addQuadCurve(to: tailTip, control: CGPoint(x: baseX + half * 0.5, y: h + (tailTip.y - h) * 0.25))
-            path.addQuadCurve(to: CGPoint(x: baseX - half, y: h), control: CGPoint(x: baseX - half * 0.2, y: h + (tailTip.y - h) * 0.35))
+            path.addCurve(to: tip, control1: CGPoint(x: baseX + half * 0.3, y: h), control2: CGPoint(x: tip.x + 1, y: h + tail * 0.5))
+            path.addCurve(to: CGPoint(x: baseX - half, y: h), control1: CGPoint(x: tip.x - 2, y: h + tail * 0.45), control2: CGPoint(x: baseX - half * 0.4, y: h))
         }
         path.addLine(to: CGPoint(x: r, y: h))
         path.addArc(tangent1End: CGPoint(x: 0, y: h), tangent2End: CGPoint(x: 0, y: h - r), radius: r)
@@ -999,6 +1032,8 @@ final class CursorView: NSView {
         path.closeSubpath()
         speech.path = path
         speech.shadowPath = path
+        speechFillMask.path = path
+        speechBorder.path = path
     }
 }
 

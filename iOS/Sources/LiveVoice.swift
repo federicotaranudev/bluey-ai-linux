@@ -328,27 +328,34 @@ final class LiveVoice: NSObject, ObservableObject {
         }
     }
 
-    /// A tiny cartoon "bwee-bi-bip": a few quick rising blips, like a little creature chattering.
+    /// A tiny cartoon chirp: a few soft, round, bell-like notes from a happy pentatonic scale,
+    /// each with a little upward "boop" at the start, like a small creature humming.
     private func chirp(syllables: Int) {
         guard audioReady else { return }
         let rate = playFormat.sampleRate
+        // C major pentatonic, two octaves up high (C6…E7), so it always sounds sweet together.
+        let scale = [1046.5, 1174.7, 1318.5, 1568.0, 1760.0, 2093.0, 2349.3, 2637.0]
+        var index = Int.random(in: 1...3)
         var samples: [Float] = []
-        let base = Double.random(in: 820...1000)
         for i in 0..<syllables {
-            let duration = i == 0 ? 0.085 : Double.random(in: 0.05...0.075)
+            if i > 0 { index = min(max(index + [-1, 1, 1, 2].randomElement()!, 0), scale.count - 1) }
+            let note = scale[index] * 0.5  // drop an octave: rounder, less piercing
+            let duration = i == syllables - 1 ? 0.13 : Double.random(in: 0.07...0.09)
             let count = Int(duration * rate)
-            let start = base * (i == 0 ? 0.72 : Double.random(in: 0.88...1.3))
-            let end = start * (i == syllables - 1 ? 1.55 : Double.random(in: 1.12...1.35))
             var phase = 0.0
             for n in 0..<count {
+                let time = Double(n) / rate
                 let t = Double(n) / Double(count)
-                let frequency = start + (end - start) * t * t
-                phase += 2 * .pi * frequency / rate
-                let envelope = min(1, t * 14) * pow(1 - t, 1.8)
-                let wave = sin(phase) + 0.22 * sin(2 * phase) + 0.06 * sin(3 * phase)
-                samples.append(Float(wave * envelope * 0.3))
+                // Scoops up into the note over the first 25 ms, with a gentle wobble on the last one.
+                let scoop = 1 - 0.18 * exp(-time / 0.012)
+                let wobble = i == syllables - 1 ? 1 + 0.012 * sin(time * 2 * .pi * 18) : 1
+                phase += 2 * .pi * note * scoop * wobble / rate
+                let attack = min(1, time / 0.006)
+                let envelope = attack * exp(-t * 3.2) * (1 - pow(t, 6))
+                let wave = sin(phase) + 0.12 * sin(2 * phase)
+                samples.append(Float(wave * envelope * 0.26))
             }
-            samples += [Float](repeating: 0, count: Int(rate * Double.random(in: 0.018...0.035)))
+            samples += [Float](repeating: 0, count: Int(rate * 0.028))
         }
         guard let buffer = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(samples.count)),
               let out = buffer.floatChannelData?[0] else { return }
