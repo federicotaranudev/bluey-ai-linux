@@ -172,6 +172,27 @@ def test_an_openai_key_still_asks_openai(desktop, qt, monkeypatch):
     assert 'endpoint' not in results[-1]
 
 
+def test_a_stale_wayland_environment_still_opens_on_x11(monkeypatch):
+    import bluey.__main__ as entry
+    monkeypatch.setenv("DISPLAY", ":0.0")
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/no/such/dir")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "")
+    entry.choose_qt_platform()
+    assert os.environ["QT_QPA_PLATFORM"] == "xcb"
+
+
+def test_a_real_wayland_session_is_left_to_qt(monkeypatch, tmp_path):
+    import bluey.__main__ as entry
+    (tmp_path / "wayland-0").write_text("")
+    monkeypatch.setenv("DISPLAY", ":0.0")
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    entry.choose_qt_platform()
+    assert os.environ.get("QT_QPA_PLATFORM", "") != "xcb"
+
+
 def test_the_log_file_is_where_problems_can_be_read(qt):
     from bluey.settings import log_file
     assert log_file().name.endswith('.log')

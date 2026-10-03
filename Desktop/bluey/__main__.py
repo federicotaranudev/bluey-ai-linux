@@ -8,6 +8,21 @@ import sys
 from pathlib import Path
 
 
+def choose_qt_platform() -> None:
+    """Point Qt at X11 when a terminal left over from Wayland still asks for wayland.
+
+    Without this the Qt wayland plugin is loaded, fails to reach a compositor that
+    no longer exists, and only then falls back — or simply refuses to start.
+    """
+    if not sys.platform.startswith("linux") or not os.environ.get("DISPLAY"):
+        return
+    from .backend import on_wayland
+    if on_wayland():
+        return
+    if os.environ.get("QT_QPA_PLATFORM", "").lower() in ("", "wayland", "wayland-egl"):
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Bluey desktop companion for Ubuntu and Windows")
     parser.add_argument("--port", type=int, default=8765, help="LAN TCP port (default: 8765)")
@@ -38,6 +53,7 @@ def main() -> int:
     except OSError:
         pass
     from .app import DesktopApp
+    choose_qt_platform()
     app = QApplication(sys.argv[:1])
     app.setApplicationName("BlueyDesktop")
     app.setOrganizationName("BlueyDesktop")
