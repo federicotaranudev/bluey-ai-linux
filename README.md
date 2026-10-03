@@ -51,6 +51,8 @@ Needs full Xcode. Open `GooglyEyes.xcodeproj` (regenerate with `xcodegen generat
 
 **No Mac?** [docs/iphone-ubuntu.md](docs/iphone-ubuntu.md) builds the app on a GitHub Actions macOS runner and installs it on your iPhone straight from Ubuntu. With a **free** Apple ID, `scripts/altserver-install.sh` signs the CI's unsigned `.ipa` for you (7-day renewals); with the paid developer program, CI signs a normal `.ipa` that lasts a year.
 
+**No OpenAI bill either?** Paste a free [Groq](https://console.groq.com/keys) key (`gsk_…`) into the desktop instead. Groq has no Realtime API, so the desktop runs a small local Realtime stand-in that serves the phone over your LAN and translates to Groq's speech-to-text and chat — same hold-to-talk, same tools, free tier. See [Desktop setup](Desktop/README.md#voice-without-openai-use-a-groq-key-free).
+
 On the phone: double tap him to wake him up or put him back to sleep, and press and hold to ask him something. The faint speaker button at the top right sets the chirp volume and picks which Mac to pair with.
 
 ## Layout

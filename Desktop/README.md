@@ -2,7 +2,42 @@
 
 This is a Python / Qt desktop port of [rbrown101010/bluey-by-riley](https://github.com/rbrown101010/bluey-by-riley). It replaces the Mac companion on Ubuntu and Windows and speaks the same `_googly._tcp` Bonjour / newline-delimited JSON protocol to the original iPhone app. The Swift iOS, Mac and shared protocol sources remain unchanged.
 
-The desktop shows the character and speech bubbles, follows or points around the screen, captures screenshots and optional OCR, handles the phone's tool requests, and creates temporary OpenAI client secrets. Computer control starts disabled and can be enabled in the desktop window. The OpenAI key is kept in the OS credential store when available; otherwise it lasts only for the current session.
+The desktop shows the character and speech bubbles, follows or points around the screen, captures screenshots and optional OCR, handles the phone's tool requests, and creates temporary OpenAI client secrets. Computer control starts disabled and can be enabled in the desktop window. The API key is kept in the OS credential store when available; otherwise it lasts only for the current session.
+
+## Voice without OpenAI: use a Groq key (free)
+
+Groq has no Realtime API, so the desktop runs a small **local Realtime stand-in**
+(`bluey/realtime_proxy.py`): the phone connects to it instead of OpenAI, and it
+translates to Groq's speech-to-text (`whisper-large-v3-turbo`) and chat
+(`llama-3.3-70b-versatile`) with the same desktop tools. Everything else — hold to
+talk, the eyes, the bubbles, the chirps, the transcripts, computer control — behaves
+as before.
+
+Just paste a Groq key (`gsk_…`) into the same box. The provider is detected from the
+key, and the desktop hands the phone its own `ws://` address automatically. An OpenAI
+key keeps the original path, including `web_research`.
+
+| | OpenAI key | Groq key |
+|---|---|---|
+| Cost | needs a paid plan | **free tier** (rate limits) |
+| Speech to text | Realtime VAD | `whisper-large-v3-turbo` |
+| Model | `gpt-realtime-2.1` | `llama-3.3-70b-versatile` |
+| `web_research` report card | yes | no (Groq has no search tool) |
+| Screenshots sent to the model | yes | only with a vision model |
+| Latency | lower | ~0.5–1 s more (transcribe, then answer) |
+
+Screenshots still reach the model as **OCR text and control IDs** from
+`look_at_screen`; the JPEG itself is only forwarded when the chosen Groq model can
+see images. Override the defaults with environment variables:
+
+```bash
+BLUEY_GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct ./scripts/run-desktop.sh   # vision
+BLUEY_GROQ_STT_MODEL=whisper-large-v3 ./scripts/run-desktop.sh                          # slower, better
+```
+
+The proxy listens on a random LAN port and only accepts the phone, using a token
+minted per session; it never talks to OpenAI and holds no audio longer than the
+90-second buffer.
 
 ## Run on Ubuntu
 
