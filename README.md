@@ -49,7 +49,7 @@ The menu bar blob also sets mood, cursor size (48 to 120 pt), glow, and where th
 
 Needs full Xcode. Open `GooglyEyes.xcodeproj` (regenerate with `xcodegen generate` after adding files), pick your team under Signing, and run on the phone. It finds the Mac on the same Wi-Fi by itself.
 
-**No Mac?** [docs/iphone-ubuntu.md](docs/iphone-ubuntu.md) builds the same app on a GitHub Actions macOS runner and installs the `.ipa` on your iPhone straight from Ubuntu — one-time Apple paperwork in a browser, `scripts/ios-signing.sh` for the crypto, `scripts/install-iphone.sh` to put it on the phone.
+**No Mac?** [docs/iphone-ubuntu.md](docs/iphone-ubuntu.md) builds the app on a GitHub Actions macOS runner and installs it on your iPhone straight from Ubuntu. With a **free** Apple ID, `scripts/altserver-install.sh` signs the CI's unsigned `.ipa` for you (7-day renewals); with the paid developer program, CI signs a normal `.ipa` that lasts a year.
 
 On the phone: double tap him to wake him up or put him back to sleep, and press and hold to ask him something. The faint speaker button at the top right sets the chirp volume and picks which Mac to pair with.
 

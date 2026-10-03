@@ -2,28 +2,91 @@
 
 Building an iOS app requires Apple's compiler, which only runs on macOS — but you
 never need a Mac *computer*: this guide builds the app on a **GitHub Actions
-macOS runner** (a free rented Mac, ~10 minutes) and installs the result on your
-iPhone **from Ubuntu**. You only do the Apple paperwork once, in a browser, plus
-two helper scripts.
+macOS runner** (a free rented Mac, ~1 minute) and installs the result on your
+iPhone **from Ubuntu**.
 
 ```
-your Ubuntu PC ──openssl──▶ signing request ──browser──▶ certificate + profile
-      │                                                        │
-      └──git push──▶ GitHub macOS runner ──xcodebuild──▶ .ipa ◀┘
-                                    │
-                     scripts/install-iphone.sh ──▶ your iPhone
+your Ubuntu PC ──git push──▶ GitHub macOS runner ──xcodebuild──▶ unsigned .ipa
+                                     │                                 │
+                                     │                      scripts/altserver-install.sh
+                                     ▼                                 ▼
+                            (no Apple account               signed + installed on
+                             needed in CI)                  your iPhone
 ```
 
-**What you need**
+**Two ways to sign — pick one:**
+
+| | [Path 1: free Apple ID](#path-1-free-apple-id-recommended) | [Path 2: paid account](#path-2-paid-apple-developer-program) |
+|---|---|---|
+| Cost | **Free** | €99/year |
+| Apple paperwork | none | browser: certificate, App ID, device, profile |
+| Signing validity | **7 days**, re-sign in ~1 min | 1 year |
+| Extra tools | Docker (anisette server) + AltServer-Linux | none |
+| Needs a Mac | no | no |
+
+**What you need either way**
 
 | | |
 |---|---|
-| iPhone | iOS **17.0+**, a Lightning/USB-C cable (charge-only cables won't work) |
-| Apple ID | A free one is enough (apps then expire after 7 days — see [Renewing](#renewing-every-7-days)) |
-| Ubuntu tools | `openssl`, `libimobiledevice`, `ideviceinstaller` — already on your machine; otherwise `sudo apt install openssl libimobiledevice ideviceinstaller` |
-| GitHub account | Public repos build macOS runners for free; private repos get 2,000 min/month (macOS counts 10×, so ~200 real minutes — one build is ~5 min) |
+| iPhone | iOS **17.0+**, a Lightning/USB-C data cable (charge-only cables won't work) |
+| Ubuntu tools | `libimobiledevice` + `ideviceinstaller` — otherwise `sudo apt install libimobiledevice-utils ideviceinstaller` |
+| GitHub account | Public repos build macOS runners for free; private repos get 2,000 min/month (macOS counts 10×, so ~200 real minutes — one build is ~1 min) |
 
 ---
+
+# Path 1 (free Apple ID) — recommended
+
+No Apple account, no Mac, no browser forms. CI hands you an **unsigned** `.ipa`,
+and [AltServer-Linux](https://github.com/NyaMisty/AltServer-Linux) signs it with
+your free Apple ID and installs it over the USB pairing.
+
+## 1. One-time setup
+
+```bash
+# Anisette data for Apple's login handshake (the public servers are unreliable)
+docker run -d --restart unless-stopped --name anisette -p 6969:6969 dadoum/anisette-v3-server
+
+# The AltServer binary
+mkdir -p ~/altserver
+curl -fsSL https://github.com/NyaMisty/AltServer-Linux/releases/download/v0.0.5/AltServer-x86_64 \
+  -o ~/altserver/AltServer
+chmod +x ~/altserver/AltServer
+```
+
+## 2. Install Googly Eyes
+
+```bash
+./scripts/altserver-install.sh          # downloads the newest .ipa and installs it
+```
+
+It finds the phone, downloads the latest build from Actions, then asks for your
+Apple ID and password. Use an **app-specific password**
+([appleid.apple.com → Sign-In and Security](https://appleid.apple.com)) rather than
+your real one, and expect a prompt for your 2FA code.
+
+## 3. On the phone (first time only)
+
+1. **Settings → Privacy & Security → Developer Mode** → turn on, reboot. iOS requires
+   this for development-signed apps.
+2. **Settings → General → VPN & Device Management** → trust the *Apple Development* profile.
+3. Open **Googly Eyes**.
+
+## 4. Keep it alive
+
+Free Apple IDs expire apps after **7 days** and allow only a few app installs per
+week. Just run the same command again with a fresh build:
+
+```bash
+gh workflow run "iPhone app (.ipa)" && sleep 90 && ./scripts/altserver-install.sh
+```
+
+---
+
+# Path 2 (paid Apple Developer Program)
+
+Use this if you have the €99 membership: it signs for a full year with no Docker,
+no AltServer and no weekly refresh. The CI job switches to it automatically as soon
+as the three secrets exist.
 
 ## 1. Get your iPhone's UDID
 
@@ -50,7 +113,11 @@ mkdir -p ~/bluey-signing && cd ~/bluey-signing
 (adjust the script path to wherever your repo lives). This writes `ios.key` (your
 secret key — never share it, never commit it) and `ios.csr` (the request you upload).
 
-## 3. The Apple paperwork (browser, ~10 minutes)
+## 3. The Apple paperwork (browser, ~10 minutes — **paid membership required**)
+
+> Free Apple IDs cannot create certificates, App IDs, devices or profiles in this
+> portal. Everything below needs the €99 Apple Developer Program; use Path 1 above
+> if you don't have it.
 
 Go to [developer.apple.com/account](https://developer.apple.com/account) and sign
 in with your Apple ID. If it asks you to accept a license agreement, do that first.
