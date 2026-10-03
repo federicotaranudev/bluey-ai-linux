@@ -1,0 +1,75 @@
+name: Desktop checks and bundles
+
+on:
+  push:
+    paths:
+      - 'Desktop/**'
+      - 'Shared/Fonts/**'
+      - 'scripts/*desktop*'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'Desktop/**'
+      - 'Shared/Fonts/**'
+      - 'scripts/*desktop*'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.os }} / Python 3.12
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: Desktop/pyproject.toml
+      - name: Install Ubuntu display libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0
+      - name: Install desktop and build dependencies
+        run: python -m pip install -e "Desktop[test,build]"
+      - name: Run unit tests
+        run: python -m pytest Desktop/tests
+      - name: Run headless Qt smoke test
+        run: python -m bluey --smoke-test
+      - name: Build native executable
+        run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build/desktop Desktop/bluey.spec
+      - name: Smoke test Ubuntu bundle
+        if: runner.os == 'Linux'
+        run: ./dist/BlueyDesktop/BlueyDesktop --smoke-test
+      - name: Smoke test Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\dist\BlueyDesktop\BlueyDesktop.exe -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Bundle smoke test failed: $($process.ExitCode)" }
+      - name: Archive Ubuntu bundle
+        if: runner.os == 'Linux'
+        run: tar -czf dist/BlueyDesktop-ubuntu-x86_64.tar.gz -C dist BlueyDesktop
+      - name: Archive Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/BlueyDesktop -DestinationPath dist/BlueyDesktop-windows-x64.zip
+      - name: Upload native bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlueyDesktop-${{ runner.os }}-x64
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error

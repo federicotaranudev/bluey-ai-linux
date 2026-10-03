@@ -1,5 +1,19 @@
 # Googly Eyes
 
+## Ubuntu and Windows desktop port
+
+This copy adds **Bluey Desktop** for Ubuntu and Windows. It works with the existing iPhone app; the iOS app, original Mac app and shared Swift files remain unchanged. No Mac is needed to run or build the new desktop companion.
+
+- **Ubuntu:** install Python 3.12 and the system dependencies, then run `./scripts/run-desktop.sh` in an Xorg session.
+- **Windows:** install Python 3.12, then run `powershell -ExecutionPolicy Bypass -File .\scripts\run-desktop.ps1` from this folder.
+- **Portable apps:** native build scripts and a GitHub Actions workflow produce Ubuntu and Windows bundles.
+
+See [Desktop setup, pairing and build instructions](Desktop/README.md) for the complete steps. Installing the unchanged iPhone app from source still requires Xcode on a Mac, or an existing prebuilt / TestFlight version from its publisher. Desktop connections require approval; use the unencrypted pairing protocol only on a trusted private LAN.
+
+Original project: [rbrown101010/bluey-by-riley](https://github.com/rbrown101010/bluey-by-riley). Upstream did not include a project license; no new license for its code is implied.
+
+## Original Mac and iPhone project
+
 A blueberry character who lives on an iPhone under your Mac's screen and points at things with his own big cursor.
 
 **Now:** no voice out. Double tap him on the phone (or press ⌥Space on the Mac) to start a session: the phone's mic stays on and everything you say becomes context, but he stays quiet. **Press and hold the screen** to ask him something; let go and he answers. His reply pops up as a cute speech bubble next to his cursor (or above the phone when he isn't pointing), with a little cartoon chirp from the phone. Ask "what's this?" and he points at whatever is under your mouse. Double tap again and he goes back to follow mode.
@@ -35,10 +49,13 @@ The menu bar blob also sets mood, cursor size (48 to 120 pt), glow, and where th
 
 Needs full Xcode. Open `GooglyEyes.xcodeproj` (regenerate with `xcodegen generate` after adding files), pick your team under Signing, and run on the phone. It finds the Mac on the same Wi-Fi by itself.
 
+**No Mac?** [docs/iphone-ubuntu.md](docs/iphone-ubuntu.md) builds the same app on a GitHub Actions macOS runner and installs the `.ipa` on your iPhone straight from Ubuntu — one-time Apple paperwork in a browser, `scripts/ios-signing.sh` for the crypto, `scripts/install-iphone.sh` to put it on the phone.
+
 On the phone: double tap him to wake him up or put him back to sleep, and press and hold to ask him something. The faint speaker button at the top right sets the chirp volume and picks which Mac to pair with.
 
 ## Layout
 
+- `Desktop/` Ubuntu / Windows companion (Python + Qt), with its own setup guide and tests
 - `Shared/` pairing protocol (Bonjour `_googly._tcp`, newline JSON) and colors, used by both apps
 - `Mac/` menu bar app (Swift package target `GooglyMac`)
 - `iOS/` iPhone app (SwiftUI)

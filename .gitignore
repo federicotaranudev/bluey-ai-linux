@@ -8,3 +8,13 @@ xcuserdata/
 Secrets.xcconfig
 *.env
 .env*
+
+# Ubuntu / Windows desktop port
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+Desktop/.coverage
