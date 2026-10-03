@@ -377,6 +377,33 @@ class BackendTests(unittest.TestCase):
 
 
 
+class WaylandDetectionTests(unittest.TestCase):
+    """A stale XDG_SESSION_TYPE must not switch everything off after a reboot."""
+
+    def test_a_stale_wayland_variable_is_ignored_when_there_is_no_socket(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "",
+                                         "XDG_RUNTIME_DIR": folder, "DISPLAY": ":0.0"}, clear=True):
+                self.assertFalse(backend.on_wayland())
+                self.assertIsNone(backend.DesktopBackend()._platform_reason())
+
+    def test_a_real_wayland_socket_is_believed_even_if_the_variable_disagrees(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "wayland-0").write_text("")
+            with patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11", "XDG_RUNTIME_DIR": folder,
+                                         "DISPLAY": ":0.0"}, clear=True):
+                self.assertTrue(backend.on_wayland())
+
+    def test_without_a_runtime_directory_the_variables_are_the_only_evidence(self):
+        with patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland", "DISPLAY": ":0.0"}, clear=True):
+            self.assertTrue(backend.on_wayland())
+        with patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0.0"}, clear=True):
+            self.assertFalse(backend.on_wayland())
+
+    def test_this_machine_is_not_treated_as_wayland_right_now(self):
+        self.assertFalse(backend.on_wayland())
+
+
 class WaylandHintTests(unittest.TestCase):
     def test_it_points_at_the_x11_session_when_the_system_has_one(self):
         with tempfile.TemporaryDirectory() as folder:

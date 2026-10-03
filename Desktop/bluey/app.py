@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QPointF, QTimer, Signal, Slot
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from .backend import DesktopBackend, wayland_hint
+from .backend import DesktopBackend, on_wayland, wayland_hint
 from .protocol import PhoneServer
 from .realtime import ACTION_NAMES, groq_session, mint_token, research
 from .realtime_proxy import RealtimeProxy
@@ -132,7 +132,7 @@ class DesktopApp(QObject):
 
     def setup_hotkeys(self):
         import os
-        if platform.system() == "Linux" and os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
+        if platform.system() == "Linux" and on_wayland():
             return
         try:
             from pynput.keyboard import GlobalHotKeys
@@ -149,7 +149,7 @@ class DesktopApp(QObject):
             messages = [messages]
         self.window.diagnostics.setText("\n".join(messages) or "Primary display · local phone discovery · optional Tesseract OCR")
         import os
-        if platform.system() == "Linux" and os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
+        if platform.system() == "Linux" and on_wayland():
             self.window.show_notice(wayland_hint())
             self.window.control.setEnabled(False)
 

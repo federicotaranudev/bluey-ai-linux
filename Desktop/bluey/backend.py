@@ -123,6 +123,29 @@ def normalize_keys(value: str | list[str]) -> tuple[str, ...]:
 X11_SESSION_DIR = Path("/usr/share/xsessions")
 
 
+def wayland_socket() -> bool:
+    """True when this session really has a Wayland compositor socket."""
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+    try:
+        return any(runtime.glob("wayland-*"))
+    except OSError:
+        return False
+
+
+def on_wayland() -> bool:
+    """True only when Wayland is actually in use, not merely claimed.
+
+    `XDG_SESSION_TYPE` and `WAYLAND_DISPLAY` can survive a reboot inside a shell's
+    environment, and a stale value would switch off screen reading and input for no
+    reason. The socket is the evidence; the variables are only a fallback.
+    """
+    if os.environ.get("XDG_RUNTIME_DIR"):
+        return wayland_socket()
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return True
+    return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+
+
 def x11_sessions(directory: Path = X11_SESSION_DIR) -> list[Path]:
     """The X11 login sessions this system offers, if any."""
     try:
@@ -245,8 +268,8 @@ class DesktopBackend:
         if sys.platform == "win32":
             return None
         if sys.platform.startswith("linux"):
-            if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
-                return "Screen capture and computer control require an X11 session. Log out and choose Ubuntu on Xorg; Wayland is not supported."
+            if on_wayland():
+                return "Screen capture and computer control require an X11 session. Log out and choose an X11 session; Wayland is not supported."
             if not os.environ.get("DISPLAY"):
                 return "No desktop display is available. Start Bluey in your graphical X11 session."
             return None
