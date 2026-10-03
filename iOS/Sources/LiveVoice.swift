@@ -12,8 +12,9 @@ final class LiveVoice: NSObject, ObservableObject {
 
     static let model = "gpt-realtime-2.1"
 
-    /// Asks the Mac for a short-lived key. Calls back with nil on failure.
-    var requestToken: ((@escaping (String?) -> Void) -> Void)?
+    /// Asks the Mac for a short-lived key, and where to use it.
+    /// Calls back with (nil, nil) on failure. The endpoint is nil for OpenAI.
+    var requestToken: ((@escaping (String?, String?) -> Void) -> Void)?
     /// Runs a tool on the Mac: (name, JSON arguments) → (output text, optional JPEG base64).
     var runTool: ((String, String, @escaping (String, String?) -> Void) -> Void)?
     /// What he's saying, as it streams in. `done` is true when the reply finished.
@@ -81,11 +82,11 @@ final class LiveVoice: NSObject, ObservableObject {
                     return
                 }
                 guard let requestToken = self.requestToken else { self.setState(.asleep); return }
-                requestToken { token in
+                requestToken { token, endpoint in
                     DispatchQueue.main.async {
                         guard self.state == .waking else { return }
                         guard let token else { self.setState(.asleep); return }
-                        self.connect(token)
+                        self.connect(token, endpoint: endpoint)
                     }
                 }
             }
@@ -146,8 +147,12 @@ final class LiveVoice: NSObject, ObservableObject {
 
     // MARK: Connection
 
-    private func connect(_ token: String) {
-        var request = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime?model=\(Self.model)")!)
+    private func connect(_ token: String, endpoint: String? = nil) {
+        // A desktop running its own voice proxy (Groq) tells us where to connect;
+        // with an OpenAI key there is no endpoint and we go straight to OpenAI.
+        let address = endpoint.flatMap { URL(string: $0) }
+            ?? URL(string: "wss://api.openai.com/v1/realtime?model=\(Self.model)")!
+        var request = URLRequest(url: address)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = URLSession.shared.webSocketTask(with: request)
         self.socket = socket

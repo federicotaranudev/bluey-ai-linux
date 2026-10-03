@@ -19,6 +19,7 @@ dependencies = [
     "pywinauto>=0.6.9,<0.7; sys_platform == 'win32'",
     "keyring>=25,<27",
     "platformdirs>=4,<5",
+    "websockets>=13,<17",
 ]
 
 [project.optional-dependencies]

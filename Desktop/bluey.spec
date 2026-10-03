@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 desktop = Path(SPECPATH)
 repo = desktop.parent
 hiddenimports = collect_submodules("keyring.backends")
-hiddenimports += ["zeroconf", "PIL.Image", "pytesseract"]
+hiddenimports += ["zeroconf", "PIL.Image", "pytesseract", "websockets.asyncio.server"]
 if sys.platform == "win32":
     hiddenimports += [
         "mss.windows",

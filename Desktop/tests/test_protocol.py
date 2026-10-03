@@ -92,6 +92,22 @@ class PhoneServerTests(unittest.TestCase):
         self.assertEqual(self.packets.get(timeout=2)[1]["text"], "hé 🫐")
         self.assertEqual(self.packets.get(timeout=2)[1], {"command": "awake"})
 
+    def test_the_desktop_can_address_a_reply_to_the_phone_it_came_from(self):
+        connection, peer_id = self.connect()
+        self.approve(connection, peer_id)
+        self.assertEqual(self.server.address_of(peer_id), "127.0.0.1")
+        self.assertIsNone(self.server.address_of("not-a-peer"))
+
+    def test_a_local_voice_endpoint_travels_to_the_phone(self):
+        connection, peer_id = self.connect()
+        self.approve(connection, peer_id)
+        connection.sendall(b'{"command":"realtimeToken","callID":"t1"}\n')
+        self.assertEqual(self.packets.get(timeout=2)[1]["callID"], "t1")
+        self.assertTrue(self.server.send(peer_id, {
+            "command": "realtimeToken", "callID": "t1", "text": "local-token",
+            "endpoint": "ws://127.0.0.1:9999/v1/realtime"}))
+        self.assertEqual(self.receive(connection)["endpoint"], "ws://127.0.0.1:9999/v1/realtime")
+
     def test_hello_command_and_preapproval_batch_cannot_execute(self):
         original = self.server.on_pending
         def immediate_accept(peer_id, name, address):

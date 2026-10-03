@@ -53,6 +53,11 @@ class Preferences:
 MOODS = ("listening", "resting", "thinking", "talking", "pointing", "happy", "sleepy")
 
 
+def provider_for_key(key: str) -> str:
+    """Which service a saved key belongs to. Groq keys start with `gsk_`."""
+    return "groq" if key.strip().startswith("gsk_") else "openai"
+
+
 def config_file() -> Path:
     return user_config_path("BlueyDesktop", appauthor=False) / "settings.json"
 

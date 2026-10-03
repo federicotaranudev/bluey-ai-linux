@@ -15,8 +15,9 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from .backend import DesktopBackend
 from .protocol import PhoneServer
-from .realtime import ACTION_NAMES, mint_token, research
-from .settings import Credentials, Preferences
+from .realtime import ACTION_NAMES, groq_session, mint_token, research
+from .realtime_proxy import RealtimeProxy
+from .settings import Credentials, Preferences, provider_for_key
 from .visuals import CursorOverlay, berry_icon
 from .window import MainWindow, ReportWindow
 
@@ -61,6 +62,7 @@ class DesktopApp(QObject):
         self.awake = False
         self.hotkeys = None
         self.tray = None
+        self.proxy = None
         self.last_token = {}
         self.server = PhoneServer(socket.gethostname(), self.bridge.packet.emit,
                                   self.bridge.pending.emit, self.bridge.phones.emit,
@@ -237,7 +239,15 @@ class DesktopApp(QObject):
             if cancel.is_set() or not self.server.is_approved(peer):
                 raise RuntimeError("Request cancelled. Ask again when ready.")
             if packet["command"] == "realtimeToken":
-                result["text"] = mint_token(key, personality, control, platform.system())
+                if provider_for_key(key) == "groq":
+                    # No OpenAI account: the phone talks to our own Realtime stand-in,
+                    # addressed from wherever it connected to us.
+                    proxy = self.realtime_proxy()
+                    host = (self.server.address_of(peer) or "").split(":")[0] or "127.0.0.1"
+                    result["text"] = proxy.token()
+                    result["endpoint"] = proxy.url_for(host)
+                else:
+                    result["text"] = mint_token(key, personality, control, platform.system())
             else:
                 raw = packet.get("text", "{}")
                 if not isinstance(raw, str) or len(raw) > 65536:
@@ -262,6 +272,20 @@ class DesktopApp(QObject):
                 result["text"] = "Request cancelled." if packet["command"] == "tool" else None
             self.bridge.result.emit(peer, result)
             self.bridge.job_done.emit()
+
+    def realtime_proxy(self):
+        """Start, once, the local Realtime stand-in used when the saved key is Groq's."""
+        if self.proxy is None:
+            self.proxy = RealtimeProxy(
+                api_key=lambda: self.credentials.get(),
+                tools=lambda: groq_session(self.prefs.personality, self.control_enabled)[1],
+                instructions=lambda: groq_session(self.prefs.personality, self.control_enabled)[0])
+            try:
+                self.proxy.start()
+            except Exception as exc:
+                self.proxy = None
+                raise RuntimeError(f"The local voice proxy could not start: {exc}") from None
+        return self.proxy
 
     def capture(self, cancel):
         ready = threading.Event()
@@ -441,10 +465,18 @@ class DesktopApp(QObject):
             self.window.key_status.setText(str(exc))
 
     def refresh_key_status(self):
-        if self.credentials.get():
-            self.window.key_status.setText("API key saved in your system credential vault." if self.credentials.persisted else "API key available for this launch only. Unlock your system credential vault to save it.")
+        key = self.credentials.get()
+        if not key:
+            self.window.key_status.setText("Add an OpenAI or Groq API key for voice and research. Your key stays on this computer.")
+            return
+        groq = provider_for_key(key) == "groq"
+        service = "Groq" if groq else "OpenAI"
+        if not self.credentials.persisted:
+            self.window.key_status.setText(f"{service} key available for this launch only. Unlock your system credential vault to save it.")
+        elif groq:
+            self.window.key_status.setText("Groq key saved. Voice runs through your computer's free Groq proxy; web research needs an OpenAI key.")
         else:
-            self.window.key_status.setText("Add an OpenAI API key for voice and research. Your main key stays on this computer.")
+            self.window.key_status.setText("OpenAI key saved in your system credential vault.")
 
     def shutdown(self):
         if self.quitting:
@@ -458,6 +490,9 @@ class DesktopApp(QObject):
         self.server.stop()
         if self.tray:
             self.tray.hide()
+        if self.proxy:
+            self.proxy.stop()
+            self.proxy = None
         self.overlay.close()
         self.reports.close()
         self.executor.shutdown(wait=False, cancel_futures=True)

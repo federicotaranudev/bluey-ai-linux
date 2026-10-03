@@ -104,7 +104,7 @@ struct RootView: View {
     /// Connects the live voice to the Mac: keys, tools, captions and wake/sleep.
     private func wireLiveVoice() {
         live.requestToken = { [link] done in
-            link.request(Packet(command: "realtimeToken")) { reply in done(reply?.text) }
+            link.request(Packet(command: "realtimeToken")) { reply in done(reply?.text, reply?.endpoint) }
         }
         live.runTool = { [link] name, arguments, done in
             link.request(Packet(command: "tool", tool: name, text: arguments)) { reply in

@@ -50,10 +50,13 @@ public struct Packet: Codable, Sendable {
     public var text: String?
     /// A JPEG (base64) that goes with a tool result.
     public var image: String?
+    /// A Realtime WebSocket address supplied by the desktop instead of OpenAI.
+    /// The desktop sends this when it runs its own voice proxy (e.g. a Groq key).
+    public var endpoint: String?
 
     public init(face: FaceState? = nil, hello: String? = nil, volume: Double? = nil, command: String? = nil,
                 audio: String? = nil, speech: Int? = nil, callID: String? = nil, tool: String? = nil,
-                text: String? = nil, image: String? = nil) {
+                text: String? = nil, image: String? = nil, endpoint: String? = nil) {
         self.face = face
         self.hello = hello
         self.volume = volume
@@ -64,6 +67,7 @@ public struct Packet: Codable, Sendable {
         self.tool = tool
         self.text = text
         self.image = image
+        self.endpoint = endpoint
     }
 }
 
