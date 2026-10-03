@@ -9,21 +9,32 @@ IPA=${1:-}
 
 for tool in ideviceinfo idevicepair ideviceinstaller; do
     command -v "$tool" >/dev/null || {
-        echo "$tool is missing. Install it with: sudo apt install libimobiledevice ideviceinstaller" >&2
+        echo "$tool is missing. Install it with: sudo apt install libimobiledevice-utils ideviceinstaller" >&2
         exit 1
     }
 done
 
-if ! ideviceinfo >/dev/null 2>&1; then
-    echo "Plug in the iPhone (unlock it) and accept 'Trust This Computer' on the screen."
+BUNDLE_ID=co.visionairy.googly.phone
+
+# ideviceinstaller 1.2+ uses subcommands; older builds use -i / -U.
+if ideviceinstaller --help 2>&1 | grep -q 'install PATH'; then
+    INSTALL=(ideviceinstaller -w install)
+    UNINSTALL=(ideviceinstaller uninstall)
+else
+    INSTALL=(ideviceinstaller -i)
+    UNINSTALL=(ideviceinstaller -U)
+fi
+
+if ! ideviceinfo -k UniqueDeviceID >/dev/null 2>&1; then
+    echo "Plug in the iPhone, unlock it, then tap 'Trust This Computer' on the screen."
     idevicepair pair || { echo "Pairing failed. Unlock the phone and try again." >&2; exit 1; }
 fi
 
 echo "Installing $IPA …"
-if ! ideviceinstaller -i "$IPA"; then
+if ! "${INSTALL[@]}" "$IPA"; then
     echo "Install failed; removing any previous copy and retrying."
-    ideviceinstaller -U co.visionairy.googly.phone >/dev/null 2>&1 || true
-    ideviceinstaller -i "$IPA"
+    "${UNINSTALL[@]}" "$BUNDLE_ID" >/dev/null 2>&1 || true
+    "${INSTALL[@]}" "$IPA"
 fi
 
 echo

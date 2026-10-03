@@ -157,7 +157,7 @@ certificate expires.
 | Workflow: *No signing certificate* | Wrong/expired `.p12` or wrong `IOS_P12_PASSWORD`. Redo step 4. |
 | Workflow: *profile doesn't include the device* | Register the device (3.3), rebuild the profile (3.4), refresh `IOS_PROFILE_BASE64`. |
 | Workflow: *No profiles for team …* / export fails | The profile changed — just update `IOS_PROFILE_BASE64`; the workflow reads its name automatically. |
-| `ideviceinstaller`: *invalid / Could not install* | `ideviceinstaller -U co.visionairy.googly.phone` then install again (the script retries this for you). |
+| `ideviceinstaller`: *invalid / Could not install* | `ideviceinstaller uninstall co.visionairy.googly.phone` (older builds: `-U`), then install again — the script retries this for you. |
 | Phone: *Untrusted Developer* | Settings → General → VPN & Device Management → Trust. |
 | Phone: app opens then quits | Usually an expired build — renew (above). |
 | App can't find the desktop | Same Wi-Fi, desktop running, no guest Wi-Fi; allow the **Local Network** permission (Settings → Privacy → Local Network). |
