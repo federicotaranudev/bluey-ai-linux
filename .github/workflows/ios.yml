@@ -1,9 +1,16 @@
 name: iPhone app (.ipa)
 
-# Builds the iPhone app on a macOS runner and signs it with the development
-# certificate + provisioning profile you create once in your browser
-# (see docs/iphone-ubuntu.md). No Mac is needed anywhere else: download the
-# artifact and install it on the phone from Ubuntu with scripts/install-iphone.sh.
+# Builds the iPhone app on a macOS runner. It always produces something
+# installable on the phone:
+#
+#   • GooglyEyes-unsigned.ipa — with no Apple account anywhere in CI. Sign and
+#     install it on Ubuntu with a FREE Apple ID via AltServer-Linux
+#     (docs/iphone-ubuntu.md → "Install with a free Apple ID").
+#   • GooglyEyes.ipa — a fully signed build, produced only when the signing
+#     secrets exist (paid Apple Developer Program account).
+#
+# Either way, no Mac is needed: download the artifact and install it with the
+# scripts in this repository.
 
 on:
   workflow_dispatch:
@@ -13,7 +20,7 @@ permissions:
 
 jobs:
   build:
-    name: Build and sign Googly Eyes
+    name: Build Googly Eyes
     # Xcode 26.6 (iOS 26 SDK): the app uses AVAudioSession's .allowBluetoothHFP,
     # which only exists in Xcode 26+; the macOS 15 image defaults to Xcode 16.4.
     runs-on: macos-26
@@ -32,7 +39,7 @@ jobs:
             echo "All signing secrets present."
           else
             echo "have=false" >> "$GITHUB_OUTPUT"
-            echo "Signing secrets are not set yet."
+            echo "No signing secrets: building an unsigned .ipa to sign with AltServer-Linux." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Install XcodeGen and generate the project
@@ -40,19 +47,33 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      # Until the Apple signing assets exist (docs/iphone-ubuntu.md steps 3–5),
-      # still prove that the app compiles on the macOS runner.
-      - name: Validate the build without signing
+      # No Apple account needed: archive with signing switched off, then wrap the
+      # .app in a Payload directory. AltServer-Linux signs this on your PC.
+      - name: Build without signing
         if: steps.secrets.outputs.have == 'false'
         run: |
           xcodebuild -project GooglyEyes.xcodeproj -scheme GooglyEyes -configuration Release \
-            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/GooglyEyes.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" archive
 
-      - name: Ask for the signing secrets
+      - name: Package the unsigned .ipa
         if: steps.secrets.outputs.have == 'false'
         run: |
-          echo "::error::The app builds, but no .ipa can be signed yet. Do docs/iphone-ubuntu.md steps 3–5 (Apple developer portal: certificate, App ID, device, profile) and then set the secrets IOS_P12_BASE64, IOS_P12_PASSWORD and IOS_PROFILE_BASE64 (base64 commands are in step 5 of that guide), then re-run this workflow."
-          exit 1
+          set -euo pipefail
+          APP=$(ls -d "$RUNNER_TEMP"/GooglyEyes.xcarchive/Products/Applications/*.app | head -1)
+          mkdir -p "$RUNNER_TEMP/unsigned/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/unsigned/Payload/"
+          (cd "$RUNNER_TEMP/unsigned" && zip -qry GooglyEyes-unsigned.ipa Payload)
+          cp "$RUNNER_TEMP/unsigned/GooglyEyes-unsigned.ipa" "$RUNNER_TEMP/GooglyEyes-unsigned.ipa"
+          echo "Packaged $(basename "$APP") as an unsigned .ipa." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the unsigned .ipa
+        if: steps.secrets.outputs.have == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: GooglyEyes-unsigned-ipa
+          path: ${{ runner.temp }}/GooglyEyes-unsigned.ipa
+          if-no-files-found: error
 
       - name: Install the signing certificate
         if: steps.secrets.outputs.have == 'true'
