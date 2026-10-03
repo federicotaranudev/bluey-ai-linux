@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -26,7 +27,16 @@ def main() -> int:
             pass
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
+    from .settings import log_file
     from .visuals import register_fonts
+    # Written to a file, because the window is not somewhere to read stack traces from.
+    path = log_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=str(path), level=logging.INFO,
+                            format="%(asctime)s %(levelname)-7s %(name)s %(message)s")
+    except OSError:
+        pass
     from .app import DesktopApp
     app = QApplication(sys.argv[:1])
     app.setApplicationName("BlueyDesktop")

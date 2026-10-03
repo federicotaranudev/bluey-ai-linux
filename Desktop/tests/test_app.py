@@ -110,3 +110,44 @@ def test_cancelled_token_never_reaches_phone(desktop, qt, monkeypatch):
     spin(qt, lambda: desktop.jobs == 0)
     assert results[-1]['text'] is None
     assert 'ephemeral-test-secret' not in json.dumps(results)
+
+
+def test_a_groq_key_hands_the_phone_a_local_voice_endpoint(desktop, qt, monkeypatch):
+    import bluey.app
+    monkeypatch.setattr(desktop.server, 'is_approved', lambda _: True)
+    monkeypatch.setattr(desktop.server, 'address_of', lambda peer: '192.168.1.20:51234')
+    monkeypatch.setattr(desktop.credentials, 'get', lambda: 'gsk_free_key')
+    results = []
+    monkeypatch.setattr(desktop.server, 'send', lambda peer, packet: results.append(packet))
+    started = []
+    proxy = SimpleNamespace(token=lambda: 'local-voice-token',
+                            url_for=lambda host: f'ws://{host}:9001/v1/realtime')
+    monkeypatch.setattr(desktop, 'realtime_proxy', lambda: started.append(True) or proxy)
+    monkeypatch.setattr(bluey.app, 'mint_token',
+                        lambda *args: pytest.fail('OpenAI must not be called for a Groq key'))
+    desktop.handle_packet('phone', {'command': 'realtimeToken', 'callID': 'groq-1'})
+    spin(qt, lambda: desktop.jobs == 0 and bool(started))
+    reply = results[-1]
+    assert reply['callID'] == 'groq-1'
+    assert reply['text'] == 'local-voice-token'
+    # The address is the one the phone connected from, so the phone can reach it back.
+    assert reply['endpoint'] == 'ws://192.168.1.20:9001/v1/realtime'
+
+
+def test_an_openai_key_still_asks_openai(desktop, qt, monkeypatch):
+    import bluey.app
+    monkeypatch.setattr(desktop.server, 'is_approved', lambda _: True)
+    monkeypatch.setattr(desktop.credentials, 'get', lambda: 'sk-openai')
+    results = []
+    monkeypatch.setattr(desktop.server, 'send', lambda peer, packet: results.append(packet))
+    monkeypatch.setattr(desktop, 'realtime_proxy', lambda: pytest.fail('Groq proxy used for an OpenAI key'))
+    monkeypatch.setattr(bluey.app, 'mint_token', lambda *args: 'ek_ephemeral')
+    desktop.handle_packet('phone', {'command': 'realtimeToken', 'callID': 'oai-1'})
+    spin(qt, lambda: desktop.jobs == 0)
+    assert results[-1]['text'] == 'ek_ephemeral'
+    assert 'endpoint' not in results[-1]
+
+
+def test_the_log_file_is_where_problems_can_be_read(qt):
+    from bluey.settings import log_file
+    assert log_file().name.endswith('.log')

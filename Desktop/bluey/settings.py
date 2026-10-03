@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from dataclasses import dataclass, asdict
 
-from platformdirs import user_config_path
+from platformdirs import user_config_path, user_log_path
 
 
 @dataclass
@@ -60,6 +60,11 @@ def provider_for_key(key: str) -> str:
 
 def config_file() -> Path:
     return user_config_path("BlueyDesktop", appauthor=False) / "settings.json"
+
+
+def log_file() -> Path:
+    """Where the desktop writes its log, so problems can be looked at afterwards."""
+    return user_log_path("BlueyDesktop", appauthor=False) / "bluey-desktop.log"
 
 
 class Credentials:
