@@ -14,7 +14,9 @@ permissions:
 jobs:
   build:
     name: Build and sign Googly Eyes
-    runs-on: macos-15
+    # Xcode 26.6 (iOS 26 SDK): the app uses AVAudioSession's .allowBluetoothHFP,
+    # which only exists in Xcode 26+; the macOS 15 image defaults to Xcode 16.4.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
