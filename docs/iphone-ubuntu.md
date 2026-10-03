@@ -39,14 +39,16 @@ No cable handy? On the phone: **Settings → General → About → UDID** (tap t
 
 ## 2. Create a signing request
 
-From your repository folder:
+Do this in a folder **outside** the repository, so the private key can never be
+committed:
 
 ```bash
-./scripts/ios-signing.sh csr "you@example.com"
+mkdir -p ~/bluey-signing && cd ~/bluey-signing
+~/Documents/ChatGPT/bluey/scripts/ios-signing.sh csr "you@example.com"
 ```
 
-This writes `ios.key` (your secret key — never share it, never commit it) and
-`ios.csr` (the request you upload). Both land in the current directory.
+(adjust the script path to wherever your repo lives). This writes `ios.key` (your
+secret key — never share it, never commit it) and `ios.csr` (the request you upload).
 
 ## 3. The Apple paperwork (browser, ~10 minutes)
 
@@ -72,11 +74,12 @@ in with your Apple ID. If it asks you to accept a license agreement, do that fir
 
 ## 4. Turn the certificate into a `.p12`
 
-Put the two downloaded files in your repository folder (browser downloads usually
+Keep the two downloaded files together with `ios.key` (browser downloads usually
 land in `~/Downloads`):
 
 ```bash
-./scripts/ios-signing.sh p12 ~/Downloads/development.cer ios.key ios.p12 "choose-a-password"
+cd ~/bluey-signing
+~/Documents/ChatGPT/bluey/scripts/ios-signing.sh p12 ~/Downloads/development.cer ios.key ios.p12 "choose-a-password"
 ```
 
 The script checks that the certificate really belongs to `ios.key`, and prints
@@ -100,7 +103,7 @@ Then create the three secrets — with the [`gh` CLI](https://cli.github.com/) o
 the browser under **Settings → Secrets and variables → Actions → New repository secret**:
 
 ```bash
-base64 -w0 ios.p12 > /tmp/p12.b64
+base64 -w0 ~/bluey-signing/ios.p12 > /tmp/p12.b64
 base64 -w0 ~/Downloads/"Bluey iPhone Dev.mobileprovision" > /tmp/profile.b64
 
 gh secret set IOS_P12_BASE64    < /tmp/p12.b64

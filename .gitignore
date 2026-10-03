@@ -9,6 +9,12 @@ Secrets.xcconfig
 *.env
 .env*
 
+# iPhone signing material — keep these out of the repo
+ios.key
+ios.csr
+*.p12
+*.mobileprovision
+
 # Ubuntu / Windows desktop port
 .venv/
 __pycache__/
