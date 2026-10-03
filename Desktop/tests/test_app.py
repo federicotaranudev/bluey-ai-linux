@@ -115,7 +115,8 @@ def test_cancelled_token_never_reaches_phone(desktop, qt, monkeypatch):
 def test_a_groq_key_hands_the_phone_a_local_voice_endpoint(desktop, qt, monkeypatch):
     import bluey.app
     monkeypatch.setattr(desktop.server, 'is_approved', lambda _: True)
-    monkeypatch.setattr(desktop.server, 'address_of', lambda peer: '192.168.1.20:51234')
+    monkeypatch.setattr(desktop.server, 'address_of', lambda peer: '192.168.1.178:51234')
+    monkeypatch.setattr(desktop.server, 'local_address_of', lambda peer: '192.168.1.115')
     monkeypatch.setattr(desktop.credentials, 'get', lambda: 'gsk_free_key')
     results = []
     monkeypatch.setattr(desktop.server, 'send', lambda peer, packet: results.append(packet))
@@ -130,8 +131,31 @@ def test_a_groq_key_hands_the_phone_a_local_voice_endpoint(desktop, qt, monkeypa
     reply = results[-1]
     assert reply['callID'] == 'groq-1'
     assert reply['text'] == 'local-voice-token'
-    # The address is the one the phone connected from, so the phone can reach it back.
-    assert reply['endpoint'] == 'ws://192.168.1.20:9001/v1/realtime'
+    # Our own address, never the phone's: telling the phone to call itself fails instantly.
+    assert reply['endpoint'] == 'ws://192.168.1.115:9001/v1/realtime'
+    assert '192.168.1.178' not in reply['endpoint']
+
+
+def test_the_endpoint_falls_back_to_this_machines_lan_address(desktop, qt, monkeypatch):
+    import bluey.app
+    monkeypatch.setattr(desktop.server, 'is_approved', lambda _: True)
+    monkeypatch.setattr(desktop.server, 'local_address_of', lambda peer: None)
+    monkeypatch.setattr(bluey.app, 'lan_address', lambda: '10.0.0.9')
+    monkeypatch.setattr(desktop.credentials, 'get', lambda: 'gsk_free_key')
+    results = []
+    monkeypatch.setattr(desktop.server, 'send', lambda peer, packet: results.append(packet))
+    proxy = SimpleNamespace(token=lambda: 'tok', url_for=lambda host: f'ws://{host}:9001/v1/realtime')
+    monkeypatch.setattr(desktop, 'realtime_proxy', lambda: proxy)
+    desktop.handle_packet('phone', {'command': 'realtimeToken', 'callID': 'fallback-1'})
+    spin(qt, lambda: desktop.jobs == 0)
+    assert results[-1]['endpoint'] == 'ws://10.0.0.9:9001/v1/realtime'
+
+
+def test_lan_address_is_a_routable_local_address():
+    import ipaddress
+    from bluey.app import lan_address
+    self_ip = ipaddress.ip_address(lan_address())
+    assert self_ip.is_private or self_ip.is_loopback
 
 
 def test_an_openai_key_still_asks_openai(desktop, qt, monkeypatch):

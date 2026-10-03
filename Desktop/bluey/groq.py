@@ -8,17 +8,21 @@ uses when the saved key is a Groq key.
 from __future__ import annotations
 
 import json
+import math
 import os
-import re
 import struct
 import uuid
-from typing import Any, Iterator
+from array import array
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 
 GROQ_BASE = "https://api.groq.com/openai/v1"
-# Llama 3.3 70B is fast, cheap on the free tier, and calls tools reliably.
-CHAT_MODEL = os.environ.get("BLUEY_GROQ_MODEL", "llama-3.3-70b-versatile")
+# Cloudflare in front of Groq refuses the default Python user agent (error 1010),
+# so every request identifies itself like an ordinary client.
+USER_AGENT = "bluey-desktop/0.1"
+# gpt-oss 120B calls tools reliably and is available on the free tier.
+CHAT_MODEL = os.environ.get("BLUEY_GROQ_MODEL", "openai/gpt-oss-120b")
 STT_MODEL = os.environ.get("BLUEY_GROQ_STT_MODEL", "whisper-large-v3-turbo")
 # The phone converts its microphone to 24 kHz mono 16-bit PCM before it reaches us.
 WIRE_SAMPLE_RATE = 24000
@@ -48,7 +52,8 @@ def _post(path: str, api_key: str, body: bytes, content_type: str, timeout: int,
     if len(key) > 512 or any(ord(char) <= 32 or ord(char) > 126 for char in key):
         raise APIError("The Groq API key contains invalid characters.")
     request = Request(GROQ_BASE + path, data=body, method="POST",
-                      headers={"Authorization": f"Bearer {key}", "Content-Type": content_type})
+                      headers={"Authorization": f"Bearer {key}", "User-Agent": USER_AGENT,
+                               "Content-Type": content_type})
     try:
         with build_opener().open(request, timeout=timeout) as response:
             raw = response.read(8 * 1024 * 1024 + 1)
@@ -88,10 +93,25 @@ def _multipart(fields: dict[str, str], filename: str, content: bytes, content_ty
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
+def is_silent(pcm: bytes, threshold: float = 500.0) -> bool:
+    """Whisper invents sentences for silence, so quiet audio is never worth sending."""
+    samples = array("h")
+    usable = len(pcm) - (len(pcm) % 2)
+    if usable <= 0:
+        return True
+    samples.frombytes(pcm[:usable])
+    step = max(1, len(samples) // 4000)
+    total = count = 0
+    for index in range(0, len(samples), step):
+        total += samples[index] * samples[index]
+        count += 1
+    return math.sqrt(total / max(1, count)) < threshold
+
+
 def transcribe(api_key: str, pcm: bytes, *, model: str | None = None,
                sample_rate: int = WIRE_SAMPLE_RATE, timeout: int = 45) -> str:
-    """Speech to text for one stretch of speech. Empty audio returns an empty string."""
-    if not pcm:
+    """Speech to text for one stretch of speech. Empty or silent audio returns nothing."""
+    if not pcm or is_silent(pcm):
         return ""
     if len(pcm) > MAX_AUDIO_BYTES:
         raise APIError("The recording was too long. Hold to talk for less time.")

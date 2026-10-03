@@ -127,12 +127,15 @@ class PhoneSession:
         self.pending = asyncio.ensure_future(self._transcribe(item, pcm))
 
     async def _transcribe(self, item: str, pcm: bytes) -> None:
+        log.info("Voice: transcribing %d bytes of speech", len(pcm))
         try:
             text = await asyncio.to_thread(groq.transcribe, self.api_key, pcm)
         except groq.APIError as error:
-            log.debug("Transcription failed: %s", error)
+            log.warning("Voice: transcription failed: %s", error)
             await self.send({"type": "error", "error": {"code": "transcription_failed", "message": str(error)}})
             text = ""
+        if text:
+            log.info("Voice: heard %r", text[:80])
         if text:
             self._remembered(text)
         await self.send({"type": "conversation.item.input_audio_transcription.completed",
@@ -179,9 +182,11 @@ class PhoneSession:
             if isinstance(extra, str) and extra.strip():
                 messages.append({"role": "system", "content": extra.strip()[:2000]})
             messages.extend(self.messages)
+            log.info("Voice: asking Groq with %d messages", len(messages))
             try:
                 reply = await asyncio.to_thread(groq.chat, self.api_key, messages, self.tools)
             except groq.APIError as error:
+                log.warning("Voice: Groq would not answer: %s", error)
                 await self.send({"type": "error", "error": {"code": "groq_error", "message": str(error)}})
                 return
             await self.deliver(reply)

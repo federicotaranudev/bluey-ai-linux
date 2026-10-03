@@ -195,10 +195,22 @@ class PhoneServer:
             return peer is not None and peer.approved and not peer.closed
 
     def address_of(self, peer_id: str) -> str | None:
-        """Where a peer is connecting from, so replies can address it directly."""
+        """Where a peer is connecting from."""
         with self._lock:
             peer = self._peers.get(peer_id)
         return peer.address if peer else None
+
+    def local_address_of(self, peer_id: str) -> str | None:
+        """Our own address on that connection: what the peer can reach us back on."""
+        with self._lock:
+            peer = self._peers.get(peer_id)
+        if peer is None:
+            return None
+        try:
+            host = peer.connection.getsockname()[0]
+        except OSError:
+            return None
+        return host if host not in ("", "0.0.0.0", "::") else None
 
     def send(self, peer_id: str, packet: dict) -> bool:
         data = self._encode(packet)

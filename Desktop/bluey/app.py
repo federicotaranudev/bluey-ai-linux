@@ -24,6 +24,13 @@ from .window import MainWindow, ReportWindow
 log = logging.getLogger(__name__)
 
 
+def lan_address() -> str:
+    """This machine's own address on the network, for the phone to reach us back at."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.connect(("192.0.2.1", 9))  # TEST-NET-1: it is routed, but sends nothing
+        return probe.getsockname()[0]
+
+
 class Bridge(QObject):
     packet = Signal(str, object)
     pending = Signal(str, str, str)
@@ -240,13 +247,13 @@ class DesktopApp(QObject):
                 raise RuntimeError("Request cancelled. Ask again when ready.")
             if packet["command"] == "realtimeToken":
                 if provider_for_key(key) == "groq":
-                    # No OpenAI account: the phone talks to our own Realtime stand-in,
-                    # addressed from wherever it connected to us.
+                    # No OpenAI account: the phone talks to our own Realtime stand-in.
                     proxy = self.realtime_proxy()
-                    host = (self.server.address_of(peer) or "").split(":")[0] or "127.0.0.1"
+                    host = self.server.local_address_of(peer) or lan_address()
                     result["text"] = proxy.token()
                     result["endpoint"] = proxy.url_for(host)
-                    log.info("Voice: the phone at %s was given the local proxy at %s", host, result["endpoint"])
+                    log.info("Voice: the phone at %s was given the local proxy at %s",
+                             self.server.address_of(peer), result["endpoint"])
                 else:
                     result["text"] = mint_token(key, personality, control, platform.system())
             else:

@@ -97,6 +97,10 @@ class PhoneServerTests(unittest.TestCase):
         self.approve(connection, peer_id)
         self.assertEqual(self.server.address_of(peer_id), "127.0.0.1")
         self.assertIsNone(self.server.address_of("not-a-peer"))
+        # Over loopback both ends look the same; on a real network this is our own
+        # address, which is what the phone must be told to call back on.
+        self.assertEqual(self.server.local_address_of(peer_id), "127.0.0.1")
+        self.assertIsNone(self.server.local_address_of("not-a-peer"))
 
     def test_a_local_voice_endpoint_travels_to_the_phone(self):
         connection, peer_id = self.connect()

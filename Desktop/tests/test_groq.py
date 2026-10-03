@@ -1,11 +1,15 @@
 """Groq translation: keys, WAV wrapping, tool shapes and the chat reply."""
 
 import json
+import struct
 import unittest
 from unittest.mock import patch
 
 from bluey import groq, realtime
 from bluey.settings import provider_for_key
+
+LOUD = struct.pack("<800h", *([8000, -8000] * 400))  # clearly audible PCM16
+SILENCE = b"\x00\x00" * 24000
 
 
 class Response:
@@ -44,16 +48,26 @@ class GroqTests(unittest.TestCase):
             seen["url"] = request.full_url
             seen["body"] = request.data
             seen["type"] = request.headers["Content-type"]
+            seen["agent"] = request.headers["User-agent"]
             return Response(json.dumps({"text": "  what's   this? "}).encode())
 
         with patch("bluey.groq.build_opener") as opener:
             opener.return_value.open.side_effect = lambda request, timeout=None: open_url(request)
-            text = groq.transcribe("gsk_test", b"\x00\x01" * 50)
+            text = groq.transcribe("gsk_test", LOUD)
         self.assertEqual(text, "what's this?")
         self.assertTrue(seen["url"].endswith("/audio/transcriptions"))
         self.assertIn("multipart/form-data", seen["type"])
         self.assertIn(b'name="model"', seen["body"])
         self.assertIn(b"whisper", seen["body"])
+        # Cloudflare rejects Python's default user agent with error 1010.
+        self.assertEqual(seen["agent"], groq.USER_AGENT)
+
+    def test_silence_never_reaches_whisper(self):
+        self.assertTrue(groq.is_silent(SILENCE))
+        self.assertFalse(groq.is_silent(LOUD))
+        with patch("bluey.groq._post") as post:
+            self.assertEqual(groq.transcribe("gsk_test", SILENCE), "")
+        post.assert_not_called()
 
     def test_empty_audio_never_reaches_the_network(self):
         with patch("bluey.groq._post") as post:
@@ -62,7 +76,7 @@ class GroqTests(unittest.TestCase):
 
     def test_missing_key_is_reported_without_a_request(self):
         with self.assertRaises(groq.APIError):
-            groq.transcribe("   ", b"\x00\x01")
+            groq.transcribe("   ", LOUD)
         with self.assertRaises(groq.APIError):
             groq.chat("", [{"role": "user", "content": "hi"}])
 
