@@ -43,7 +43,16 @@ minted per session; it never talks to OpenAI and holds no audio longer than the
 
 Use Ubuntu 24.04 with Python 3.12 for the simplest source setup. Python 3.11–3.14 are accepted. On Ubuntu 22.04, use the native bundle or provide Python 3.11 or newer; its default Python 3.10 is too old.
 
-For full screenshot, overlay and computer-control support, log out, select your user, choose **Ubuntu on Xorg** from the login screen's gear menu, and log in. Wayland restricts global input and screen capture; phone discovery and the settings window may still work there, but full operation requires Xorg.
+For full screenshot, overlay and computer-control support you need an **X11 session**: Wayland deliberately blocks global screen capture and synthetic input.
+
+- Where an X11 session exists (Ubuntu before 24.04, KDE, Xfce): log out, pick your user, choose **Ubuntu on Xorg** from the gear menu, log in.
+- On **GNOME 49 and later** (Ubuntu 24.04+ with GNOME, and all of Ubuntu 26.04) the X11 session was removed from GNOME itself, so there is nothing to switch to. Install another X11 desktop and pick it at login:
+  ```bash
+  sudo apt install xorg xfce4        # or: sudo apt install xubuntu-desktop
+  ```
+  XFCE and Xubuntu are ordinary X11 sessions, so Bluey gets screen reading, its cursor overlay and computer control.
+
+Phone discovery, voice and the speech bubbles keep working on Wayland; only the screen-reading and control features need the X11 session.
 
 From the repository folder:
 

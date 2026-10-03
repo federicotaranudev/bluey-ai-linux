@@ -120,6 +120,29 @@ def normalize_keys(value: str | list[str]) -> tuple[str, ...]:
     return tuple(mod for mod in _MODIFIERS if mod in modifiers) + (key,)
 
 
+X11_SESSION_DIR = Path("/usr/share/xsessions")
+
+
+def x11_sessions(directory: Path = X11_SESSION_DIR) -> list[Path]:
+    """The X11 login sessions this system offers, if any."""
+    try:
+        return sorted(directory.glob("*.desktop"))
+    except OSError:
+        return []
+
+
+def wayland_hint() -> str:
+    """Wayland blocks screen capture and input; say what this machine can actually do."""
+    if x11_sessions():
+        return ("Wayland session detected. For screen reading, the overlay and computer control, sign out "
+                "and choose an X11 session (for example Ubuntu on Xorg) from the login screen. "
+                "Phone pairing still works here.")
+    # GNOME 49 and later ship no X11 session at all, so "choose Xorg" is not advice.
+    return ("Wayland session detected, and this system offers no X11 session to switch to. Install one with "
+            "'sudo apt install xorg xfce4' and pick XFCE (or Xubuntu) at the login screen to get screen reading "
+            "and computer control. Voice, pairing and the speech bubbles work here as they are.")
+
+
 def validate_url(value: Any) -> str:
     """Only ordinary HTTP(S) links may reach the OS URL handler."""
     if not isinstance(value, str) or not value.strip() or len(value) > 8192:

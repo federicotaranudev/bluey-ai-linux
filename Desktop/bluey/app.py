@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QPointF, QTimer, Signal, Slot
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from .backend import DesktopBackend
+from .backend import DesktopBackend, wayland_hint
 from .protocol import PhoneServer
 from .realtime import ACTION_NAMES, groq_session, mint_token, research
 from .realtime_proxy import RealtimeProxy
@@ -150,7 +150,7 @@ class DesktopApp(QObject):
         self.window.diagnostics.setText("\n".join(messages) or "Primary display · local phone discovery · optional Tesseract OCR")
         import os
         if platform.system() == "Linux" and os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
-            self.window.show_notice("Wayland session detected. For screen reading, the overlay and computer control, sign out and choose “Ubuntu on Xorg” at login. Phone pairing still works here.")
+            self.window.show_notice(wayland_hint())
             self.window.control.setEnabled(False)
 
     @Slot(str, str, str)

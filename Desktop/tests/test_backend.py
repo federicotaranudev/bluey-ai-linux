@@ -4,11 +4,14 @@ import base64
 import importlib.util
 import os
 import sys
+import tempfile
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from bluey import backend
 from bluey.backend import BackendError, CancelledError, DesktopBackend, Snapshot, normalize_keys, validate_url
 
 
@@ -372,6 +375,26 @@ class BackendTests(unittest.TestCase):
         self.assertIn("The user's mouse pointer is at @", snapshot.text)
         self.assertEqual(snapshot.targets["C1"], (30, 30))
 
+
+
+class WaylandHintTests(unittest.TestCase):
+    def test_it_points_at_the_x11_session_when_the_system_has_one(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sessions = Path(folder)
+            (sessions / "ubuntu.desktop").write_text("")
+            self.assertEqual(len(backend.x11_sessions(sessions)), 1)
+            with patch("bluey.backend.x11_sessions", return_value=backend.x11_sessions(sessions)):
+                self.assertIn("choose an X11 session", backend.wayland_hint())
+
+    def test_it_says_how_to_get_an_x11_session_when_there_is_none(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch("bluey.backend.x11_sessions", return_value=backend.x11_sessions(Path(folder))):
+                hint = backend.wayland_hint()
+        self.assertIn("sudo apt install xorg xfce4", hint)
+        self.assertNotIn("choose an X11 session", hint)
+
+    def test_a_missing_session_directory_is_not_an_error(self):
+        self.assertEqual(backend.x11_sessions(Path("/does/not/exist")), [])
 
 
 class ShortcutAndURLTests(unittest.TestCase):
