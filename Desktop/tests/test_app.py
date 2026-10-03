@@ -2,6 +2,7 @@
 import json
 import os
 import socket
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -172,6 +173,7 @@ def test_an_openai_key_still_asks_openai(desktop, qt, monkeypatch):
     assert 'endpoint' not in results[-1]
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Qt platform selection is a Linux concern")
 def test_a_stale_wayland_environment_still_opens_on_x11(monkeypatch):
     import bluey.__main__ as entry
     monkeypatch.setenv("DISPLAY", ":0.0")
@@ -182,6 +184,7 @@ def test_a_stale_wayland_environment_still_opens_on_x11(monkeypatch):
     assert os.environ["QT_QPA_PLATFORM"] == "xcb"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Qt platform selection is a Linux concern")
 def test_a_real_wayland_session_is_left_to_qt(monkeypatch, tmp_path):
     import bluey.__main__ as entry
     (tmp_path / "wayland-0").write_text("")
