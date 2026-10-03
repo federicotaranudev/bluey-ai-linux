@@ -246,6 +246,7 @@ class DesktopApp(QObject):
                     host = (self.server.address_of(peer) or "").split(":")[0] or "127.0.0.1"
                     result["text"] = proxy.token()
                     result["endpoint"] = proxy.url_for(host)
+                    log.info("Voice: the phone at %s was given the local proxy at %s", host, result["endpoint"])
                 else:
                     result["text"] = mint_token(key, personality, control, platform.system())
             else:

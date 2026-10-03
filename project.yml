@@ -48,6 +48,10 @@ targets:
         NSMicrophoneUsageDescription: Talk to your blueberry. He listens while he's awake (double tap him to wake him up or put him to sleep).
         NSBonjourServices:
           - _googly._tcp
+        # The desktop can serve the Realtime socket on this local network (ws://),
+        # which App Transport Security blocks unless local networking is allowed.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         UIAppFonts:
           - Fredoka.ttf
           - IBMPlexSans.ttf
