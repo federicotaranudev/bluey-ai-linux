@@ -57,7 +57,15 @@ chmod +x ~/altserver/AltServer
 
 ```bash
 ./scripts/altserver-install.sh          # downloads the newest .ipa and installs it
+
+# ...or sign the .ipa that is already in the repo (no Actions round-trip):
+./scripts/altserver-install.sh builds/ios/GooglyEyes-unsigned.ipa
 ```
+
+The repo ships the current unsigned build at `builds/ios/GooglyEyes-unsigned.ipa`
+(with its `SHA256SUMS`). It is rebuilt automatically on every change to the iOS
+sources; when you want something newer than the commit you have, use the plain
+command above.
 
 It finds the phone, downloads the latest build from Actions, then asks for your
 Apple ID and password. Use an **app-specific password**
