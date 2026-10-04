@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -11,6 +12,44 @@ from PySide6.QtGui import QColor, QCursor, QFont, QFontDatabase, QIcon, QLinearG
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .settings import Preferences
+
+
+def make_click_through(widget: QWidget) -> None:
+    """Let mouse clicks reach the windows underneath an always-on-top overlay.
+
+    Qt's own WindowTransparentForInput is unreliable on plain X11 (nothing
+    enforces it), so the full-screen cursor overlay swallows every click meant
+    for a real app. An empty X input region is honoured by the X server itself,
+    so we set that directly through XFixes.
+    """
+    if sys.platform != "linux" or not os.environ.get("DISPLAY"):
+        return
+    if os.environ.get("QT_QPA_PLATFORM", "") in ("offscreen", "minimal", "vnc"):
+        return  # those platforms hand out fake window ids; X would kill us
+    try:
+        import ctypes
+
+        window_id = int(widget.winId())  # forces the native handle into existence
+        x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+        xfixes = ctypes.cdll.LoadLibrary("libXfixes.so.3")
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        connection = x11.XOpenDisplay(None)
+        if not connection:
+            return
+        xfixes.XFixesSetWindowShapeRegion.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int,
+        ]
+        # shape kind 2 = ShapeInput, with no rectangles at all, so the X server
+        # itself routes every click past this window instead of to it.
+        xfixes.XFixesSetWindowShapeRegion(
+            ctypes.c_void_p(connection), ctypes.c_ulong(window_id), 2, 0, 0, None, 0,
+        )
+        x11.XSync(ctypes.c_void_p(connection), 0)
+        x11.XCloseDisplay(ctypes.c_void_p(connection))
+    except Exception:
+        return  # no XFixes, or no X display: Qt's own handling remains
 
 INK = "#17151F"
 SOFT = "#B9B2CC"
@@ -95,6 +134,7 @@ class CursorOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        make_click_through(self)
         self.caption = ""
         self.caption_until = 0.0
         self.pinned = False

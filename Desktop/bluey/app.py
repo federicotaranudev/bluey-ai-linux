@@ -18,7 +18,7 @@ from .protocol import PhoneServer
 from .realtime import ACTION_NAMES, groq_session, mint_token, research
 from .realtime_proxy import RealtimeProxy
 from .settings import Credentials, Preferences, provider_for_key
-from .visuals import CursorOverlay, berry_icon
+from .visuals import CursorOverlay, berry_icon, make_click_through
 from .window import MainWindow, ReportWindow
 
 log = logging.getLogger(__name__)
@@ -105,6 +105,7 @@ class DesktopApp(QObject):
             self.setup_hotkeys()
             self.refresh_capabilities()
             self.overlay.show()
+            make_click_through(self.overlay)  # show() can rebuild the native window
             self.network_executor.submit(self.start_server)
 
     def start_server(self):
@@ -316,6 +317,7 @@ class DesktopApp(QObject):
             QTimer.singleShot(90, ready.set)
         elif not self.quitting and not self.smoke:
             self.overlay.show()
+            make_click_through(self.overlay)
 
     def run_tool(self, name, args, cancel, key, control):
         if name == "look_at_screen":
