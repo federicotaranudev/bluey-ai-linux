@@ -169,6 +169,22 @@ async function wake() {
   }
 }
 
+async function rearm() {
+    // Each turn closes the microphone to release it, so it must be opened again
+    // or the next tap has nothing to record and silently does nothing.
+    if (asleep || busy) return;
+    try {
+      await startListening();
+      berry.classList.add('listening');
+      note('Tap the berry and talk, or type to him');
+    } catch (e) {
+      asleep = true;
+      berry.classList.remove('listening');
+      note(e.name === 'NotAllowedError'
+        ? 'Microphone blocked in the browser settings.' : String(e.message), true);
+    }
+}
+
 async function ask() {
   if (busy || asleep) return;
   busy = true;
@@ -176,10 +192,10 @@ async function ask() {
   note('Listening…');
   try {
     const audio = stopListening();
-    if (!audio.base64) { note('I did not catch that. Hold and talk a bit louder.', true); return; }
+    if (!audio.base64) { note('I did not catch that. Try talking a bit louder.', true); await rearm(); return; }
     note('Writing that down…');
     const heard = await post('/api/transcribe', { pcm_base64: audio.base64, sample_rate: audio.sampleRate });
-    if (!heard.text) { note('I did not catch that. Hold and talk a bit louder.', true); return; }
+    if (!heard.text) { note('I did not catch that. Try talking a bit louder.', true); await rearm(); return; }
     say(heard.text, 'you');
     note('Thinking…');
     await replyTo(heard.text);
@@ -187,11 +203,15 @@ async function ask() {
     say(String(e.message), 'bluey');
   } finally {
     busy = false;
-    if (!asleep) note('Tap the berry and talk, or type to him');
+    await rearm();
   }
 }
 
-berry.addEventListener('pointerdown', event => { event.preventDefault(); asleep ? wake() : ask(); });
+berry.addEventListener('pointerdown', event => {
+  event.preventDefault();
+  if (busy) return;                 // a turn is already in flight, ignore extra taps
+  asleep ? wake() : ask();
+});
 window.addEventListener('contextmenu', event => event.preventDefault());
 fetch('/api/status').then(r => r.json())
   .then(s => { if (s.ready) note('Tap the berry to wake him, or just type'); else note('Add a Groq key in the desktop app first.', true); })
