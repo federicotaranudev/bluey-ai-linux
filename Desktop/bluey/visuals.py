@@ -24,8 +24,11 @@ def make_click_through(widget: QWidget) -> None:
     """
     if sys.platform != "linux" or not os.environ.get("DISPLAY"):
         return
-    if os.environ.get("QT_QPA_PLATFORM", "") in ("offscreen", "minimal", "vnc"):
-        return  # those platforms hand out fake window ids; X would kill us
+    if os.environ.get("QT_QPA_PLATFORM", "").lower() in ("offscreen", "minimal", "vnc", "wayland"):
+        return  # no real X11 window id here; asking X about it would kill the app
+    from .backend import on_wayland
+    if on_wayland():
+        return  # Wayland has no X window to shape: Qt's own flags already do the job
     try:
         import ctypes
 
