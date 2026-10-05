@@ -123,9 +123,18 @@ def normalize_keys(value: str | list[str]) -> tuple[str, ...]:
 X11_SESSION_DIR = Path("/usr/share/xsessions")
 
 
+def _runtime_dir() -> Path:
+    """Session runtime dir without assuming POSIX (os.getuid is missing on Windows)."""
+    override = os.environ.get("XDG_RUNTIME_DIR")
+    if override:
+        return Path(override)
+    getuid = getattr(os, "getuid", None)
+    return Path(f"/run/user/{getuid()}") if callable(getuid) else Path("/run/user/0")
+
+
 def wayland_socket() -> bool:
     """True when this session really has a Wayland compositor socket."""
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
+    runtime = _runtime_dir()
     try:
         return any(runtime.glob("wayland-*"))
     except OSError:

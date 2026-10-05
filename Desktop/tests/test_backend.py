@@ -403,7 +403,9 @@ class WaylandDetectionTests(unittest.TestCase):
 
     def test_what_this_machine_reports_matches_its_own_wayland_socket(self):
         # Bluey must believe whatever the machine actually is, not a stale variable.
-        runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        getuid = getattr(os, "getuid", None)
+        fallback = f"/run/user/{getuid()}" if callable(getuid) else "/run/user/0"
+        runtime = os.environ.get("XDG_RUNTIME_DIR", fallback)
         has_socket = bool(glob.glob(os.path.join(runtime, "wayland-*")))
         self.assertEqual(backend.on_wayland(), has_socket)
 
