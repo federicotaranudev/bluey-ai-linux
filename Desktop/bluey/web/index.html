@@ -26,14 +26,42 @@
            border-bottom-left-radius:6px; border:1px solid #322c4a; }
   .bluey.thinking { opacity:.6; font-style:italic; }
   @keyframes pop { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
-  .berry { width:132px; height:132px; margin:6px auto 2px; border-radius:50%;
+  .berry { width:112px; height:112px; margin:2px auto; border-radius:50%;
            background: radial-gradient(circle at 34% 30%, #cdd8ff, var(--berry) 55%, #7d8fd8 100%);
            box-shadow: 0 18px 50px rgba(169,188,255,.28), inset 0 -8px 22px rgba(0,0,0,.14);
            display:grid; place-items:center; cursor:pointer; user-select:none; flex:none;
            transition:transform .16s ease, box-shadow .2s; }
   .berry.listening { transform:scale(1.12); box-shadow:0 0 0 10px rgba(169,188,255,.12),
+                     0 18px 60px rgba(169,188,255,.4); }
+  .eyes { display:flex; gap:24px; }
+  .eye { width:20px; height:24px; background:var(--ink); border-radius:50%; }
+  .berry.listening .eye { animation:blink 1.1s infinite; }
+  @keyframes blink { 0%,92%,100% { transform:scaleY(1) } 96% { transform:scaleY(.12) } }
+  .hint { font-size:13px; opacity:.5; text-align:center; padding:2px 0 8px; min-height:18px; }
+  .warn { color:#ffb4a2; }
+  form { width:100%; max-width:620px; display:flex; gap:8px; padding:4px 0 14px; }
+  input[type=text] { flex:1; padding:13px 18px; border-radius:22px; font-size:16px;
+    background:#221e33; color:#e8e4f5; border:1px solid #322c4a; outline:none; }
+  input[type=text]:focus { border-color:#4b4270; }
+  input[type=text]::placeholder { color:#6f6789; }
+  button.send { width:46px; height:46px; flex:none; border-radius:50%; border:none; cursor:pointer;
+    background:var(--berry); color:var(--ink); font-size:19px; font-weight:700; }
+  button.send:disabled { opacity:.4; }
+</style>
+</head>
+<body>
+<header><h1>Bluey</h1></header>
+<div id="log"></div>
+<div class="berry" id="berry"><div class="eyes"><div class="eye"></div><div class="eye"></div></div></div>
+<div class="hint" id="hint">Tap the berry to wake him</div>
+<form id="composer" autocomplete="off">
+  <input type="text" id="typed" placeholder="Type to Bluey…" enterkeyhint="send">
+  <button class="send" id="send" type="submit" aria-label="Send">&#8593;</button>
+</form>
 <script>
-const berry = document.getElementById('berry'), log = document.getElementById('log'), hint = document.getElementById('hint');
+const berry = document.getElementById('berry'), log = document.getElementById('log'),
+      hint = document.getElementById('hint'), typed = document.getElementById('typed'),
+      composer = document.getElementById('composer'), sendButton = document.getElementById('send');
 let asleep = true, busy = false;
 
 function say(text, who) {
@@ -54,6 +82,34 @@ async function post(path, body) {
   if (!response.ok) throw new Error(data.error || 'Something went wrong.');
   return data;
 }
+
+// One conversation, however you say it: typing and talking share the same memory.
+async function replyTo(text) {
+  const bubble = say('…', 'bluey thinking');
+  const reply = await post('/api/chat', { text });
+  bubble.textContent = reply.text || 'I lost my train of thought there.';
+  bubble.className = 'turn bluey';
+}
+
+async function sendTyped(event) {
+  event.preventDefault();
+  const text = typed.value.trim();
+  if (!text || busy) return;
+  typed.value = '';
+  say(text, 'you');
+  sendButton.disabled = true;
+  note('Thinking…');
+  try {
+    await replyTo(text);
+  } catch (e) {
+    say(String(e.message), 'bluey');
+  } finally {
+    sendButton.disabled = false;
+    if (!asleep) note('Tap the berry and talk, or type to him');
+    typed.focus();
+  }
+}
+composer.addEventListener('submit', sendTyped);
 
 // Record the microphone as 16-bit mono PCM, the shape Groq's transcriptions endpoint wants.
 let context = null, processor = null, chunks = [], stream = null;
@@ -97,8 +153,7 @@ function stopListening() {
   }
   return { base64: btoa(binary), sampleRate: rate };
 }
-</script>
-<script>
+
 async function wake() {
   if (!asleep) return;
   note('Waking him…');
@@ -108,7 +163,7 @@ async function wake() {
     await startListening();
     asleep = false;
     berry.classList.add('listening');
-    note('Tap the berry and talk, then tap again');
+    note('Tap the berry and talk, or type to him');
   } catch (e) {
     note(e.name === 'NotAllowedError' ? 'Microphone blocked in the browser settings.' : String(e.message), true);
   }
@@ -127,37 +182,20 @@ async function ask() {
     if (!heard.text) { note('I did not catch that. Hold and talk a bit louder.', true); return; }
     say(heard.text, 'you');
     note('Thinking…');
-    const bubble = say('…', 'bluey thinking');
-    const reply = await post('/api/chat', { text: heard.text });
-    bubble.textContent = reply.text || 'I lost my train of thought there.';
-    bubble.className = 'turn bluey';
+    await replyTo(heard.text);
   } catch (e) {
     say(String(e.message), 'bluey');
   } finally {
     busy = false;
-    if (!asleep) note('Tap the berry and talk, then tap again');
+    if (!asleep) note('Tap the berry and talk, or type to him');
   }
 }
 
 berry.addEventListener('pointerdown', event => { event.preventDefault(); asleep ? wake() : ask(); });
 window.addEventListener('contextmenu', event => event.preventDefault());
 fetch('/api/status').then(r => r.json())
-  .then(s => { if (s.ready) note('Tap the berry to wake him'); else note('Add a Groq key in the desktop app first.', true); })
+  .then(s => { if (s.ready) note('Tap the berry to wake him, or just type'); else note('Add a Groq key in the desktop app first.', true); })
   .catch(() => note('Cannot reach the Bluey server.', true));
 </script>
-                     0 18px 60px rgba(169,188,255,.4); }
-  .eyes { display:flex; gap:26px; }
-  .eye { width:21px; height:25px; background:var(--ink); border-radius:50%; }
-  .berry.listening .eye { animation:blink 1.1s infinite; }
-  @keyframes blink { 0%,92%,100% { transform:scaleY(1) } 96% { transform:scaleY(.12) } }
-  .hint { font-size:13px; opacity:.5; text-align:center; padding:4px 0 18px; min-height:20px; }
-  .warn { color:#ffb4a2; }
-</style>
-</head>
-<body>
-<header><h1>Bluey</h1></header>
-<div id="log"></div>
-<div class="berry" id="berry"><div class="eyes"><div class="eye"></div><div class="eye"></div></div></div>
-<div class="hint" id="hint">Tap the berry to wake him</div>
 </body>
 </html>
