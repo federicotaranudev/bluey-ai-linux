@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#12101a">
+<title>Bluey</title>
+<style>
+  :root { --ink:#17151f; --berry:#a9bcff; --deep:#12101a; --card:#1e1b2b; --soft:#b9b2cc; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; height:100%; overflow:hidden; }
+  body {
+    background: radial-gradient(120% 90% at 50% 0%, #241f3d 0%, var(--deep) 60%);
+    color: var(--soft); font: 17px/1.5 ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    padding: env(safe-area-inset-top) 18px env(safe-area-inset-bottom);
+  }
+  header { text-align:center; padding:18px 0 6px; }
+  h1 { margin:0; font-size:15px; letter-spacing:.3em; text-transform:uppercase; opacity:.55; }
+  #log { flex:1; width:100%; max-width:620px; overflow-y:auto; padding:10px 0;
+         display:flex; flex-direction:column; gap:12px; -webkit-overflow-scrolling:touch; }
+  .turn { max-width:85%; padding:12px 16px; border-radius:20px; white-space:pre-wrap;
+          word-break:break-word; animation:pop .22s ease-out; }
+  .you { align-self:flex-end; background:#2c2740; color:#e8e4f5; border-bottom-right-radius:6px; }
+  .bluey { align-self:flex-start; background:var(--card); color:var(--berry);
+           border-bottom-left-radius:6px; border:1px solid #322c4a; }
+  .bluey.thinking { opacity:.6; font-style:italic; }
+  @keyframes pop { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
+  .berry { width:132px; height:132px; margin:6px auto 2px; border-radius:50%;
+           background: radial-gradient(circle at 34% 30%, #cdd8ff, var(--berry) 55%, #7d8fd8 100%);
+           box-shadow: 0 18px 50px rgba(169,188,255,.28), inset 0 -8px 22px rgba(0,0,0,.14);
+           display:grid; place-items:center; cursor:pointer; user-select:none; flex:none;
+           transition:transform .16s ease, box-shadow .2s; }
+  .berry.listening { transform:scale(1.12); box-shadow:0 0 0 10px rgba(169,188,255,.12),
+<script>
+const berry = document.getElementById('berry'), log = document.getElementById('log'), hint = document.getElementById('hint');
+let asleep = true, busy = false;
+
+function say(text, who) {
+  const div = document.createElement('div');
+  div.className = 'turn ' + who;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return div;
+}
+const note = (text, warn) => { hint.textContent = text; hint.className = warn ? 'hint warn' : 'hint'; };
+
+async function post(path, body) {
+  const response = await fetch(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+  return data;
+}
+
+// Record the microphone as 16-bit mono PCM, the shape Groq's transcriptions endpoint wants.
+let context = null, processor = null, chunks = [], stream = null;
+
+async function startListening() {
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+  });
+  context = new (window.AudioContext || window.webkitAudioContext)();
+  const source = context.createMediaStreamSource(stream);
+  processor = context.createScriptProcessor(4096, 1, 1);
+  chunks = [];
+  processor.onaudioprocess = event => {
+    const input = event.inputBuffer.getChannelData(0);
+    const out = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const sample = Math.max(-1, Math.min(1, input[i]));
+      out[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+    chunks.push(out);
+  };
+  source.connect(processor);
+  processor.connect(context.destination); // required to run, silent because we never copy input back
+}
+
+function stopListening() {
+  try { processor && processor.disconnect(); } catch (e) {}
+  try { stream && stream.getTracks().forEach(track => track.stop()); } catch (e) {}
+  const rate = context ? context.sampleRate : 24000;
+  if (context) context.close().catch(() => {});
+  context = null; processor = null; stream = null;
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const pcm = new Int16Array(total);
+  let at = 0;
+  for (const chunk of chunks) { pcm.set(chunk, at); at += chunk.length; }
+  chunks = [];
+  const bytes = new Uint8Array(pcm.buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  return { base64: btoa(binary), sampleRate: rate };
+}
+</script>
+<script>
+async function wake() {
+  if (!asleep) return;
+  note('Waking him…');
+  try {
+    const status = await fetch('/api/status').then(r => r.json());
+    if (!status.ready) { note('Add a Groq key in the Bluey desktop app first.', true); return; }
+    await startListening();
+    asleep = false;
+    berry.classList.add('listening');
+    note('Tap the berry and talk, then tap again');
+  } catch (e) {
+    note(e.name === 'NotAllowedError' ? 'Microphone blocked in the browser settings.' : String(e.message), true);
+  }
+}
+
+async function ask() {
+  if (busy || asleep) return;
+  busy = true;
+  berry.classList.remove('listening');
+  note('Listening…');
+  try {
+    const audio = stopListening();
+    if (!audio.base64) { note('I did not catch that. Hold and talk a bit louder.', true); return; }
+    note('Writing that down…');
+    const heard = await post('/api/transcribe', { pcm_base64: audio.base64, sample_rate: audio.sampleRate });
+    if (!heard.text) { note('I did not catch that. Hold and talk a bit louder.', true); return; }
+    say(heard.text, 'you');
+    note('Thinking…');
+    const bubble = say('…', 'bluey thinking');
+    const reply = await post('/api/chat', { text: heard.text });
+    bubble.textContent = reply.text || 'I lost my train of thought there.';
+    bubble.className = 'turn bluey';
+  } catch (e) {
+    say(String(e.message), 'bluey');
+  } finally {
+    busy = false;
+    if (!asleep) note('Tap the berry and talk, then tap again');
+  }
+}
+
+berry.addEventListener('pointerdown', event => { event.preventDefault(); asleep ? wake() : ask(); });
+window.addEventListener('contextmenu', event => event.preventDefault());
+fetch('/api/status').then(r => r.json())
+  .then(s => { if (s.ready) note('Tap the berry to wake him'); else note('Add a Groq key in the desktop app first.', true); })
+  .catch(() => note('Cannot reach the Bluey server.', true));
+</script>
+                     0 18px 60px rgba(169,188,255,.4); }
+  .eyes { display:flex; gap:26px; }
+  .eye { width:21px; height:25px; background:var(--ink); border-radius:50%; }
+  .berry.listening .eye { animation:blink 1.1s infinite; }
+  @keyframes blink { 0%,92%,100% { transform:scaleY(1) } 96% { transform:scaleY(.12) } }
+  .hint { font-size:13px; opacity:.5; text-align:center; padding:4px 0 18px; min-height:20px; }
+  .warn { color:#ffb4a2; }
+</style>
+</head>
+<body>
+<header><h1>Bluey</h1></header>
+<div id="log"></div>
+<div class="berry" id="berry"><div class="eyes"><div class="eye"></div><div class="eye"></div></div></div>
+<div class="hint" id="hint">Tap the berry to wake him</div>
+</body>
+</html>

@@ -1,6 +1,7 @@
 """Desktop safety and geometry tests; never generate real desktop input."""
 
 import base64
+import glob
 import importlib.util
 import os
 import sys
@@ -400,8 +401,11 @@ class WaylandDetectionTests(unittest.TestCase):
         with patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0.0"}, clear=True):
             self.assertFalse(backend.on_wayland())
 
-    def test_this_machine_is_not_treated_as_wayland_right_now(self):
-        self.assertFalse(backend.on_wayland())
+    def test_what_this_machine_reports_matches_its_own_wayland_socket(self):
+        # Bluey must believe whatever the machine actually is, not a stale variable.
+        runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        has_socket = bool(glob.glob(os.path.join(runtime, "wayland-*")))
+        self.assertEqual(backend.on_wayland(), has_socket)
 
 
 class WaylandHintTests(unittest.TestCase):
